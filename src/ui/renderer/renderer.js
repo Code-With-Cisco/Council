@@ -9,6 +9,26 @@ const identity = {
   sage: { color: '#b5da72', sigil: 'S' },
 };
 
+function identityFor(key, label) {
+  const known = identity[key];
+  if (known) return known;
+
+  let hash = 2166136261;
+  for (const char of key) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hue = Math.abs(hash) % 360;
+  const sigil =
+    label
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || '?';
+  return { color: `hsl(${hue} 68% 70%)`, sigil };
+}
+
 let state;
 let selectedKey;
 
@@ -79,13 +99,13 @@ function renderSquad(snapshot) {
   grid.replaceChildren();
 
   if (!snapshot) {
-    grid.append(element('p', 'muted', 'No roster snapshot is available. Open Diagnostics for details.'));
+      grid.append(element('p', 'muted', 'No agent snapshot is available. Open Diagnostics for details.'));
     return;
   }
 
   for (const slot of snapshot.roster.squad) {
     const session = slot.session;
-    const theme = identity[slot.member.key] ?? { color: '#8ea1ff', sigil: slot.member.label[0] ?? '?' };
+    const theme = identityFor(slot.member.key, slot.member.label);
     const card = element('article', 'specialist-card');
     card.style.setProperty('--identity', theme.color);
 
@@ -178,10 +198,12 @@ function renderDetail(slot) {
   const replyRow = element('div', 'reply-row');
   const reply = element('input');
   reply.type = 'text';
-  reply.placeholder = state?.preflight.ptyAvailable ? 'Send a plain-text reply' : 'Reply unavailable: node-pty missing';
-  reply.disabled = !state?.preflight.ptyAvailable;
+  reply.placeholder = state?.capabilities.plainTextReply
+    ? 'Send a plain-text reply'
+    : 'Reply unavailable: terminal bridge missing';
+  reply.disabled = !state?.capabilities.plainTextReply;
   const send = element('button', 'button button-primary', 'Send');
-  send.disabled = !state?.preflight.ptyAvailable;
+  send.disabled = !state?.capabilities.plainTextReply;
   send.addEventListener('click', async () => {
     const result = await runAction(send, 'Sending…', () => api.reply(session.id, reply.value));
     if (result?.ok) {
@@ -228,7 +250,7 @@ function renderDiagnostics() {
     diagnosticCard('Hook registration', `${hookCount} Windows handlers`, 'Edit|Write, PowerShell, TaskCompleted, and TeammateIdle are generated from one configuration.', hookCount === 4 ? 'is-good' : 'is-warning'),
     diagnosticCard('Terminal bridge', p.ptyAvailable ? 'Available' : 'Logs only', p.ptyAvailable ? 'Direct plain-text replies are enabled.' : 'Install the optional node-pty module to enable replies.', p.ptyAvailable ? 'is-good' : 'is-warning'),
     diagnosticCard('Claude daemon', daemonValue, daemon?.raw || 'No verified daemon status has been read.', daemonTone),
-    diagnosticCard('Roster', snapshot ? `${snapshot.roster.squad.length} specialists` : 'Unavailable', state.rosterProblems.length ? state.rosterProblems.join(' · ') : 'Configuration parsed without reported problems.', state.rosterProblems.length ? 'is-warning' : 'is-good'),
+    diagnosticCard('Agent catalog', snapshot ? `${snapshot.roster.squad.length} agents` : 'Unavailable', state.rosterProblems.length ? state.rosterProblems.join(' · ') : 'Definitions and preferences parsed without reported problems.', state.rosterProblems.length ? 'is-warning' : 'is-good'),
     diagnosticCard('Project folder', state.projectDir, 'Override with DECAGRAM_COUNCIL_PROJECT_DIR before launch.'),
   );
 

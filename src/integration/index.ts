@@ -83,13 +83,13 @@ export type { StateChange, StateChangeArea, WatchOptions } from './fs/watch.js';
 
 export {
   DEFAULT_POLL_INTERVAL_MS,
-  SPECIALIST_KEYS,
   defaultRosterConfig,
   loadRosterConfig,
+  mergeDiscoveredAgents,
   parseRosterConfig,
   saveRosterConfig,
 } from './roster/config.js';
-export type { RosterConfigLoad, SpecialistKey } from './roster/config.js';
+export type { RosterConfigLoad, RosterDiscoveryMerge } from './roster/config.js';
 export {
   buildUnifiedRoster,
   membersNeedingStart,

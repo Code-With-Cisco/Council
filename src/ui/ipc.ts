@@ -2,6 +2,7 @@ import type { StartSessionOutcome } from '../integration/client.js';
 import type { LaunchPreflight } from '../integration/preflight.js';
 import type { ReplyOutcome } from '../integration/pty/attach.js';
 import type { Snapshot } from '../integration/runtime.js';
+import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
 
 export const IPC_CHANNELS = {
   getState: 'dc:get-state',
@@ -17,6 +18,7 @@ export const IPC_CHANNELS = {
 export interface UiState {
   readonly projectDir: string;
   readonly preflight: LaunchPreflight;
+  readonly capabilities: AgentRuntimeCapabilities;
   readonly rosterProblems: readonly string[];
   readonly startupMessages: readonly string[];
   readonly snapshot: Snapshot | undefined;
@@ -45,4 +47,3 @@ export interface DecagramCouncilApi {
   council(question: string, cwd: string): Promise<UiResult<StartSessionOutcome>>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 }
-

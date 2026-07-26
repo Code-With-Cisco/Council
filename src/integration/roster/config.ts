@@ -1,22 +1,22 @@
 /**
- * The app's own roster config: which five specialists exist, which subagent
- * definition each one runs, and where each one lives.
+ * The app's own roster preferences: named launch profiles layered over the
+ * agent definitions currently visible from a project.
  *
  * This file belongs to Decagram Council, not to Claude Code, so it is stored in the app's
  * data directory rather than under `<config>`. The Claude config directory is
  * read-only to this app apart from its own hook scripts.
  *
- * The five keys and their identity colours are fixed by the design spec and
- * must not be renumbered: colour and sigil are keyed off `key`.
+ * Discovered definitions are merged in memory and are never started
+ * automatically. The editable file remains the place for labels, prompts,
+ * model overrides, and intentionally persistent profiles.
  */
 
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import * as path from 'node:path';
+import type { AgentDefinition } from '../fs/agentDefs.js';
 import type { RosterConfig, RosterMember } from '../types.js';
 
-/** Identity is fixed forever per the design spec — colours and sigils key off these. */
-export const SPECIALIST_KEYS = ['arden', 'bram', 'rook', 'tess', 'sage'] as const;
-export type SpecialistKey = (typeof SPECIALIST_KEYS)[number];
+const LEGACY_PLACEHOLDER_AGENTS = new Set(['arden', 'bram', 'rook', 'tess', 'sage']);
 
 /**
  * Poll cadence for `agents --json`. Hooks are the fast path; this is
@@ -24,26 +24,119 @@ export type SpecialistKey = (typeof SPECIALIST_KEYS)[number];
  */
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
-/** Written on first run so the user has something concrete to edit. */
-export function defaultRosterConfig(homeProject: string): RosterConfig {
-  const member = (key: SpecialistKey, label: string, role: string): RosterMember => ({
-    key,
-    label,
-    agent: key,
-    cwd: homeProject,
-    role,
-  });
-
+/**
+ * First-run preferences deliberately contain no invented agents. The live
+ * catalog comes from `.claude/agents` discovery and is merged by
+ * `mergeDiscoveredAgents`.
+ */
+export function defaultRosterConfig(_homeProject: string): RosterConfig {
   return {
     version: 1,
-    members: [
-      member('arden', 'Arden', 'Architecture'),
-      member('bram', 'Bram', 'Implementation'),
-      member('rook', 'Rook', 'Security'),
-      member('tess', 'Tess', 'Testing'),
-      member('sage', 'Sage', 'Research'),
-    ],
+    members: [],
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+  };
+}
+
+export interface RosterDiscoveryMerge {
+  readonly config: RosterConfig;
+  /** Agent names added as virtual, on-demand launch profiles. */
+  readonly discoveredAgents: readonly string[];
+  /** True when the obsolete generated five-name placeholder roster was ignored. */
+  readonly ignoredLegacyPlaceholders: boolean;
+}
+
+function displayName(agent: string): string {
+  const acronyms = new Map([
+    ['ai', 'AI'],
+    ['llm', 'LLM'],
+    ['prd', 'PRD'],
+    ['qa', 'QA'],
+    ['ui', 'UI'],
+  ]);
+  return agent
+    .split(/[-_\s]+/)
+    .filter((part) => part !== '')
+    .map((part) => acronyms.get(part.toLowerCase()) ?? `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+    .join(' ');
+}
+
+function roleSummary(description: string | undefined): string | undefined {
+  if (description === undefined) return undefined;
+  const normalized = description.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= 120) return normalized;
+  return `${normalized.slice(0, 117).trimEnd()}…`;
+}
+
+function isGeneratedLegacyPlaceholderRoster(members: readonly RosterMember[]): boolean {
+  return (
+    members.length === LEGACY_PLACEHOLDER_AGENTS.size &&
+    members.every(
+      (member) =>
+        member.key === member.agent &&
+        LEGACY_PLACEHOLDER_AGENTS.has(member.agent) &&
+        member.bootPrompt === undefined &&
+        member.model === undefined &&
+        member.effort === undefined,
+    )
+  );
+}
+
+/**
+ * Layers effective on-disk definitions over saved launch preferences.
+ *
+ * The first definition for a name is the one Claude's current precedence rules
+ * select (project definitions are returned before user definitions). Saved
+ * members win for label/order/overrides. Newly discovered agents are virtual:
+ * the user must still click Start, and the preferences file is not rewritten.
+ */
+export function mergeDiscoveredAgents(
+  config: RosterConfig,
+  definitions: readonly AgentDefinition[],
+  projectDir: string,
+): RosterDiscoveryMerge {
+  const effective = new Map<string, AgentDefinition>();
+  for (const definition of definitions) {
+    if (!effective.has(definition.name)) effective.set(definition.name, definition);
+  }
+
+  const ignoreLegacy =
+    isGeneratedLegacyPlaceholderRoster(config.members) &&
+    !config.members.some((member) => effective.has(member.agent));
+  const configured = ignoreLegacy ? [] : [...config.members];
+  const represented = new Set(configured.map((member) => member.agent));
+  const usedKeys = new Set(configured.map((member) => member.key));
+  const discovered: string[] = [];
+
+  for (const definition of [...effective.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (represented.has(definition.name)) continue;
+
+    const baseKey = `agent:${definition.name}`;
+    let key = baseKey;
+    let suffix = 2;
+    while (usedKeys.has(key)) {
+      key = `${baseKey}:${suffix}`;
+      suffix += 1;
+    }
+
+    const role = roleSummary(definition.description);
+    const member: RosterMember = {
+      key,
+      label: displayName(definition.name),
+      agent: definition.name,
+      cwd: path.resolve(projectDir),
+      ...(role === undefined ? {} : { role }),
+      ...(definition.model === undefined ? {} : { model: definition.model }),
+    };
+    configured.push(member);
+    represented.add(definition.name);
+    usedKeys.add(key);
+    discovered.push(definition.name);
+  }
+
+  return {
+    config: { ...config, members: configured },
+    discoveredAgents: discovered,
+    ignoredLegacyPlaceholders: ignoreLegacy,
   };
 }
 
@@ -123,7 +216,7 @@ export function parseRosterConfig(value: unknown, fallback: RosterConfig): Roste
     members.push(member);
   });
 
-  if (members.length === 0) {
+  if (rawMembers.length > 0 && members.length === 0) {
     return { config: fallback, problems: [...problems, 'no usable members'], createdDefault: false };
   }
 

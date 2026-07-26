@@ -7,6 +7,7 @@
  */
 
 import { chmod, copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProjectPaths } from '../paths.js';
@@ -43,7 +44,13 @@ export interface GenerateGateOptions {
 /** Locates this repo's checked-in PowerShell scripts. */
 export function bundledGatesDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', '..', 'scripts', 'gates');
+  const candidates = [
+    // tsx/source execution: <root>/src/integration/gates
+    path.resolve(here, '..', '..', '..', 'scripts', 'gates'),
+    // compiled or packaged: <root>/dist/src/integration/gates
+    path.resolve(here, '..', '..', '..', '..', 'scripts', 'gates'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[1]!;
 }
 
 function powershellCommand(

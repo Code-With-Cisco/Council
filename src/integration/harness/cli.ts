@@ -35,7 +35,7 @@ import { listAgentDefinitions } from '../fs/agentDefs.js';
 import { ClaudeStateWatcher } from '../fs/watch.js';
 import { HookReceiver, SECRET_HEADER } from '../hooks/receiver.js';
 import { buildUnifiedRoster } from '../roster/unified.js';
-import { defaultRosterConfig } from '../roster/config.js';
+import { defaultRosterConfig, mergeDiscoveredAgents } from '../roster/config.js';
 import { boardCounts, readBoard } from '../board/read.js';
 import type { CliResult, Session } from '../types.js';
 
@@ -122,7 +122,12 @@ async function roster(): Promise<void> {
     readAllTeams(paths),
   ]);
 
-  const config = defaultRosterConfig(process.cwd());
+  const definitions = await listAgentDefinitions(paths, process.cwd());
+  const config = mergeDiscoveredAgents(
+    defaultRosterConfig(process.cwd()),
+    definitions,
+    process.cwd(),
+  ).config;
   const unified = buildUnifiedRoster({ config, rosterSessions: sessions, jobs, teams });
 
   log('\nSQUAD');

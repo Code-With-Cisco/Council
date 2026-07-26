@@ -217,11 +217,11 @@ export interface StartedSession {
   readonly name: string | undefined;
 }
 
-/** One of the five specialists, as declared in the user-editable roster config. */
+/** A configured or discovered agent launch profile. */
 export interface RosterMember {
-  /** Stable key used by the UI for identity colour and sigil. */
+  /** Stable opaque key used by the UI and supervisor. */
   readonly key: string;
-  /** Display name, e.g. 'Arden'. */
+  /** Human-readable display name. */
   readonly label: string;
   /**
    * `name` frontmatter of a subagent definition under `<config>/agents/` or

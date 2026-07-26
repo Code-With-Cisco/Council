@@ -30,6 +30,8 @@ describe('Windows Electron shell', () => {
     expect(main).toContain('nodeIntegration: false');
     expect(main).toContain('sandbox: true');
     expect(main).toContain('app.setAppUserModelId(APP_ID)');
+    expect(main).toContain('isTrustedIpcSender');
+    expect(main).toContain('AgentSupervisorPort');
   });
 
   it('keeps preload channel names synchronized with the typed contract', async () => {

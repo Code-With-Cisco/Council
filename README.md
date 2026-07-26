@@ -14,7 +14,7 @@ Claude's state files, and renders that authoritative state.
 |---|---|
 | Integration module and parsers | Implemented; platform-neutral tests pass |
 | PowerShell hooks and runtime guards | Implemented; awaiting a real Windows execution |
-| Five-specialist squad UI | Implemented |
+| Discovered-agent catalog UI | Implemented |
 | Council Review pipeline | Implemented |
 | Windows launch preflight and diagnostics | Implemented |
 | x64 NSIS installer configuration | Implemented; packaging awaits final app ID and Windows verification |
@@ -49,8 +49,8 @@ IPC operations for:
 - starting a Council Review through the `council-lead` main agent; and
 - reading Windows launch diagnostics.
 
-The UI shows one card per configured specialist with identity, role, state, hot/cold status,
-and pin state. Human-blocked sessions share one amber attention channel; when several need
+The UI shows one card per configured or discovered agent with identity, role, state, hot/cold
+status, and pin state. Human-blocked sessions share one amber attention channel; when several need
 attention, the first is shown with a count instead of creating competing alert surfaces.
 
 The diagnostics view does not guess. Missing dependencies remain visible, a stopped Claude
@@ -115,9 +115,13 @@ Hooks provide the millisecond fast path, filesystem watches catch state changes,
 mutating UI state, so the CLI remains the source of truth. A failed roster read retains the
 previous roster and marks it stale instead of making the squad disappear.
 
-## Development on Windows
+## Development
 
-Run these commands from PowerShell:
+Windows is the only supported packaged target. Unpackaged development builds may
+also run on macOS so the UI and supervisor integration can be developed on the
+authoring machine; Diagnostics continues to mark that platform unsupported.
+
+Run these commands from PowerShell or a macOS terminal:
 
 ```powershell
 npm install
@@ -138,29 +142,33 @@ Before release, replace the placeholder app ID and complete every required probe
 transcript in [docs/cli-surface.md](docs/cli-surface.md) is retained only as historical parser
 evidence; it does not qualify the Windows build.
 
-## Roster configuration
+## Agent discovery and roster preferences
 
-On first run, the application writes `roster.json` under its Windows user-data directory.
-Each `agent` must match a subagent definition in the project or user Claude configuration.
-An invalid edit degrades to defaults with a visible diagnostic rather than crashing.
+On first run, the application writes an empty `roster.json` preferences file under its user-data
+directory. Effective definitions visible from the selected project's `.claude/agents/` hierarchy
+and the user Claude configuration are merged into the live catalog as on-demand profiles. Saved
+members remain label, prompt, model, effort, and ordering overrides. An invalid edit degrades with a
+visible diagnostic rather than crashing.
 
 ```json
 {
   "version": 1,
   "members": [
     {
-      "key": "arden",
-      "label": "Arden",
-      "agent": "arden",
+      "key": "builder-main",
+      "label": "Builder",
+      "agent": "builder",
       "cwd": "C:\\work\\meridian",
-      "role": "Architecture"
+      "role": "Implementation"
     }
   ],
   "pollIntervalMs": 10000
 }
 ```
 
-The fixed default identities are Arden, Bram, Rook, Tess, and Sage.
+Newly discovered definitions are never started automatically. See
+[`docs/codex-next-phase-brief.md`](docs/codex-next-phase-brief.md) for the supervisor, catalog,
+session-binding, pixel-office, and Windows verification roadmap.
 
 ## Verified integration assumptions
 

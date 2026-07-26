@@ -67,14 +67,14 @@ export interface RuntimeOptions {
 export interface BootReport {
   readonly daemon: DaemonStatus | undefined;
   readonly snapshot: Snapshot;
-  /** Configured specialists with no session at all. Safe to start automatically. */
+  /** Configured/discovered agents with no session at all. */
   readonly missing: readonly RosterMember[];
   /**
    * Specialists whose session reads `failed` — the machine-restart case.
    * Never respawned without the user seeing it first.
    */
   readonly needsWake: readonly RosterMember[];
-  /** Roster members whose `agent` does not exist on disk. Dispatching would silently run a default agent. */
+  /** Profiles whose `agent` does not exist on disk. Dispatching would silently run a default agent. */
   readonly invalidAgents: readonly AgentValidation[];
   readonly receiver: ReceiverDescriptor | undefined;
 }
@@ -343,13 +343,43 @@ export class DecagramCouncilRuntime {
   }
 
   /**
-   * "Wake the squad" — respawns sessions a machine restart left as `failed`.
+   * "Wake the squad" — respawns only configured sessions a machine restart left
+   * as `failed`.
    *
    * Only ever reached through an explicit user action.
    */
   async wakeSquad(): Promise<CliResult<string>> {
-    const result = await this.options.client.respawnAll();
+    const snapshot = this.snapshot ?? (await this.refresh());
+    const sessionIds = membersNeedingWake(snapshot.roster)
+      .map((slot) => slot.session?.id)
+      .filter((id): id is string => id !== undefined);
+
+    if (sessionIds.length === 0) {
+      return {
+        ok: true,
+        value: 'No configured agents need waking.',
+        raw: '',
+        argv: ['respawn'],
+        durationMs: 0,
+      };
+    }
+
+    const startedAt = Date.now();
+    const output: string[] = [];
+    for (const id of sessionIds) {
+      const result = await this.options.client.respawn(id);
+      if (!result.ok) return result;
+      output.push(result.value);
+    }
+
     this.scheduleRefresh();
-    return result;
+    const raw = output.join('\n');
+    return {
+      ok: true,
+      value: `Woke ${sessionIds.length} configured agent${sessionIds.length === 1 ? '' : 's'}.`,
+      raw,
+      argv: ['respawn', ...sessionIds],
+      durationMs: Date.now() - startedAt,
+    };
   }
 }

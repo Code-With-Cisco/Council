@@ -1,7 +1,7 @@
 /**
  * Finding the `claude` binary.
  *
- * A Windows desktop app can inherit a different PATH from the user's terminal.
+ * A desktop app can inherit a different PATH from the user's terminal.
  * Relying on PATH alone strands users whose CLI came from the native installer,
  * npm, or a VS Code-family extension, so known Windows locations are probed.
  */
@@ -21,7 +21,7 @@ import { runClaude } from './exec.js';
  */
 export const MINIMUM_CLAUDE_VERSION = '2.1.220';
 
-const BIN = 'claude.exe';
+const BIN = process.platform === 'win32' ? 'claude.exe' : 'claude';
 
 export interface LocatedCli {
   readonly bin: string;

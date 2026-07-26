@@ -101,7 +101,11 @@ export function buildUnifiedRoster(input: BuildRosterInput): UnifiedRoster {
   const claimed = new Set<Session>();
 
   const squad: SquadSlot[] = input.config.members.map((member) => {
-    const candidates = sessions.filter((session) => matchesMember(session, member));
+    // A session can belong to only one agent card. The old cwd fallback could
+    // otherwise place the same unnamed job into every profile sharing a project.
+    const candidates = sessions.filter(
+      (session) => !claimed.has(session) && matchesMember(session, member),
+    );
     const session = pickPrimary(candidates);
     if (session !== undefined) claimed.add(session);
     return {

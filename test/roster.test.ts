@@ -12,9 +12,14 @@ import {
   membersNeedingStart,
   membersNeedingWake,
 } from '../src/integration/roster/unified.js';
-import { parseRosterConfig, defaultRosterConfig } from '../src/integration/roster/config.js';
+import {
+  defaultRosterConfig,
+  mergeDiscoveredAgents,
+  parseRosterConfig,
+} from '../src/integration/roster/config.js';
 import { parseRoster } from '../src/integration/parse/roster.js';
 import type { JobsSnapshot } from '../src/integration/fs/jobs.js';
+import type { AgentDefinition } from '../src/integration/fs/agentDefs.js';
 import type { RosterConfig } from '../src/integration/types.js';
 
 const emptyJobs: JobsSnapshot = { states: new Map(), pinned: new Set(), problems: [] };
@@ -105,6 +110,20 @@ describe('buildUnifiedRoster', () => {
       teams: [],
     });
     expect(roster.unassigned.map((s) => s.id)).toEqual(['zzzzzzzz']);
+  });
+
+  it('never assigns one unnamed cwd-matched session to multiple agents', () => {
+    const roster = buildUnifiedRoster({
+      config,
+      rosterSessions: parseRoster([
+        { id: 'onejob00', kind: 'background', cwd: '/work/meridian', state: 'working' },
+      ]),
+      jobs: emptyJobs,
+      teams: [],
+    });
+
+    expect(roster.squad[0]?.session?.id).toBe('onejob00');
+    expect(roster.squad[1]?.missing).toBe(true);
   });
 
   it('surfaces a session that has a job file but no roster row', () => {
@@ -203,8 +222,81 @@ describe('parseRosterConfig', () => {
     expect(loaded.problems.join(' ')).toContain('pollIntervalMs');
   });
 
-  it('falls back rather than throwing on unusable input', () => {
+  it('falls back rather than throwing on unusable input and accepts empty preferences', () => {
     expect(parseRosterConfig('nope', fallback).config).toBe(fallback);
-    expect(parseRosterConfig({ members: [] }, fallback).config).toBe(fallback);
+    expect(parseRosterConfig({ members: [] }, fallback).config.members).toEqual([]);
+  });
+});
+
+describe('mergeDiscoveredAgents', () => {
+  const definition = (
+    name: string,
+    scope: AgentDefinition['scope'] = 'project',
+  ): AgentDefinition => ({
+    name,
+    description: `${name} role`,
+    model: name === 'builder' ? 'sonnet' : undefined,
+    file: `/work/.claude/agents/${name}.md`,
+    scope,
+  });
+
+  it('starts with no fictional roster members', () => {
+    expect(defaultRosterConfig('/work').members).toEqual([]);
+  });
+
+  it('adds effective discovered definitions as deterministic on-demand profiles', () => {
+    const merged = mergeDiscoveredAgents(
+      defaultRosterConfig('/work'),
+      [definition('prd-lead'), definition('builder'), definition('builder', 'user')],
+      '/work',
+    );
+
+    expect(merged.config.members.map((member) => member.agent)).toEqual(['builder', 'prd-lead']);
+    expect(merged.config.members.map((member) => member.label)).toEqual(['Builder', 'PRD Lead']);
+    expect(merged.config.members[0]?.key).toBe('agent:builder');
+    expect(merged.config.members[0]?.model).toBe('sonnet');
+    expect(merged.discoveredAgents).toEqual(['builder', 'prd-lead']);
+  });
+
+  it('preserves configured overrides and adds only new definitions', () => {
+    const saved: RosterConfig = {
+      version: 1,
+      members: [
+        {
+          key: 'build-main',
+          label: 'Forge',
+          agent: 'builder',
+          cwd: '/other',
+          bootPrompt: 'Wait for work.',
+        },
+      ],
+      pollIntervalMs: 5_000,
+    };
+    const merged = mergeDiscoveredAgents(
+      saved,
+      [definition('builder'), definition('reviewer')],
+      '/work',
+    );
+
+    expect(merged.config.members[0]).toEqual(saved.members[0]);
+    expect(merged.config.members.map((member) => member.agent)).toEqual(['builder', 'reviewer']);
+    expect(merged.config.pollIntervalMs).toBe(5_000);
+  });
+
+  it('ignores the obsolete generated placeholder roster when definitions do not support it', () => {
+    const legacy: RosterConfig = {
+      version: 1,
+      members: ['arden', 'bram', 'rook', 'tess', 'sage'].map((agent) => ({
+        key: agent,
+        label: `${agent[0]?.toUpperCase() ?? ''}${agent.slice(1)}`,
+        agent,
+        cwd: '/work',
+      })),
+      pollIntervalMs: 10_000,
+    };
+    const merged = mergeDiscoveredAgents(legacy, [definition('builder')], '/work');
+
+    expect(merged.ignoredLegacyPlaceholders).toBe(true);
+    expect(merged.config.members.map((member) => member.agent)).toEqual(['builder']);
   });
 });
