@@ -1,26 +1,75 @@
 import type { StartSessionOutcome } from '../integration/client.js';
-import type { LaunchPreflight } from '../integration/preflight.js';
 import type { ReplyOutcome } from '../integration/pty/attach.js';
 import type { Snapshot } from '../integration/runtime.js';
 import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
+import type { ResolvedAgentCatalog } from '../supervisor/catalog.js';
+import type { SessionBindingStoreProblem } from '../supervisor/sessionBindings.js';
 
 export const IPC_CHANNELS = {
   getState: 'dc:get-state',
+  chooseWorkspace: 'dc:choose-workspace',
   startMember: 'dc:start-member',
+  startNewMember: 'dc:start-new-member',
+  resumeMember: 'dc:resume-member',
+  clearBinding: 'dc:clear-binding',
   stopSession: 'dc:stop-session',
   wakeSquad: 'dc:wake-squad',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
   snapshot: 'dc:snapshot',
+  state: 'dc:state',
 } as const;
 
+export interface UiWorkspaceState {
+  readonly status: 'setup' | 'invalid' | 'ready';
+  readonly id: string | undefined;
+  readonly label: string | undefined;
+  readonly selectedPath: string | undefined;
+  readonly canonicalPath: string | undefined;
+  readonly trusted: boolean;
+  readonly developmentOverride: boolean;
+  readonly diagnostic: string | undefined;
+}
+
+export interface UiExecutableStatus {
+  readonly name: 'PowerShell' | 'git' | 'node';
+  readonly available: boolean;
+  readonly version: string | undefined;
+  readonly discoveredVia: 'candidate-probe' | 'process' | 'not-found';
+}
+
+export interface UiLaunchPreflight {
+  readonly checkedAt: string;
+  readonly platform: NodeJS.Platform;
+  readonly supportedPlatform: boolean;
+  readonly claude:
+    | {
+        readonly version: string | undefined;
+        readonly meetsMinimum: boolean;
+        readonly discoveredVia: 'override' | 'path' | 'well-known' | 'vscode-extension';
+      }
+    | null;
+  readonly powershell: UiExecutableStatus;
+  readonly git: UiExecutableStatus;
+  readonly node: UiExecutableStatus;
+  readonly guardSelfTest: {
+    readonly status: 'passed' | 'failed' | 'unavailable';
+    readonly message: string;
+  };
+  readonly hookHandlerCount: number;
+  readonly ptyAvailable: boolean;
+}
+
 export interface UiState {
-  readonly projectDir: string;
-  readonly preflight: LaunchPreflight;
+  readonly workspace: UiWorkspaceState;
+  readonly projectDir: string | undefined;
+  readonly preflight: UiLaunchPreflight | undefined;
   readonly capabilities: AgentRuntimeCapabilities;
   readonly rosterProblems: readonly string[];
   readonly startupMessages: readonly string[];
+  readonly catalog: ResolvedAgentCatalog | undefined;
+  readonly bindingProblem: SessionBindingStoreProblem | undefined;
   readonly snapshot: Snapshot | undefined;
 }
 
@@ -39,11 +88,25 @@ export type UiResult<T> = UiSuccess<T> | UiFailure;
 
 export interface DecagramCouncilApi {
   getState(): Promise<UiState>;
-  startMember(key: string): Promise<UiResult<StartSessionOutcome>>;
-  stopSession(id: string): Promise<UiResult<string>>;
+  chooseWorkspace(): Promise<UiResult<UiState>>;
+  startMember(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+  ): Promise<UiResult<StartSessionOutcome>>;
+  startNewMember(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+  ): Promise<UiResult<StartSessionOutcome>>;
+  resumeMember(profileId: string): Promise<UiResult<string>>;
+  clearBinding(profileId: string): Promise<UiResult<string>>;
+  stopSession(profileId: string): Promise<UiResult<string>>;
   wakeSquad(): Promise<UiResult<string>>;
-  logs(id: string): Promise<UiResult<string>>;
-  reply(id: string, message: string): Promise<UiResult<ReplyOutcome>>;
-  council(question: string): Promise<UiResult<StartSessionOutcome>>;
+  logs(profileId: string): Promise<UiResult<string>>;
+  reply(profileId: string, message: string): Promise<UiResult<ReplyOutcome>>;
+  council(
+    question: string,
+    expectedDefinitionFingerprint: string,
+  ): Promise<UiResult<StartSessionOutcome>>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
+  onState(listener: (state: UiState) => void): () => void;
 }

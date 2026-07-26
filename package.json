@@ -37,7 +37,7 @@
     "vitest": "^4.1.10"
   },
   "build": {
-    "appId": "com.PLACEHOLDER.decagram-council",
+    "appId": "com.decagram.council",
     "productName": "Decagram Council",
     "asar": true,
     "files": [

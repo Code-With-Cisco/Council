@@ -13,7 +13,7 @@
  * truth about session state and there is no divergent in-app model to debug.
  */
 
-import type { ClaudeClient, StartSessionOutcome } from './client.js';
+import type { ClaudeClient } from './client.js';
 import type { ClaudePaths } from './paths.js';
 import { readJobsSnapshot, type JobsSnapshot } from './fs/jobs.js';
 import { readAllTeams } from './fs/teams.js';
@@ -27,9 +27,11 @@ import type {
   CliFailure,
   CliResult,
   DaemonStatus,
+  ParseProblem,
   RosterConfig,
   RosterMember,
   Session,
+  SessionBindingRef,
 } from './types.js';
 
 export interface Snapshot {
@@ -41,17 +43,30 @@ export interface Snapshot {
    * the stale data with an explicit staleness marker.
    */
   readonly rosterError: CliFailure | undefined;
+  /**
+   * Set by the application controller when catalog/profile watching or reload
+   * fails. The last-known-good definition projection remains visible, but no
+   * new definition-based launch may proceed until an authoritative rescan
+   * clears this marker. Exact already-bound lifecycle actions remain usable.
+   */
+  readonly definitionError?: string | undefined;
   readonly updatedAt: Date;
   /** Sessions parked on a person. Drives the amber attention channel and badge count. */
   readonly needsInput: readonly Session[];
   /** True when a machine restart left the squad in `failed` — offer "wake the squad". */
   readonly needsWake: boolean;
+  readonly catalogRevision: string | undefined;
+  readonly catalogProblems: readonly ParseProblem[];
 }
 
 export interface RuntimeOptions {
   readonly client: ClaudeClient;
   readonly paths: ClaudePaths;
   readonly config: RosterConfig;
+  readonly bindings?: ReadonlyMap<string, SessionBindingRef> | undefined;
+  readonly validations?: ReadonlyMap<string, AgentValidation> | undefined;
+  readonly catalogRevision?: string | undefined;
+  readonly catalogProblems?: readonly ParseProblem[] | undefined;
   readonly onSnapshot: (snapshot: Snapshot) => void;
   /** Raw hook deliveries, for the activity log. */
   readonly onHook?: ((delivery: HookDelivery) => void) | undefined;
@@ -83,14 +98,26 @@ export class DecagramCouncilRuntime {
   private readonly watcher: ClaudeStateWatcher;
   private readonly receiver: HookReceiver;
   private timer: NodeJS.Timeout | undefined;
-  private refreshing = false;
-  private queued = false;
+  private refreshTail: Promise<void> = Promise.resolve();
+  private scheduledRefresh = false;
+  private refreshDirty = false;
   private stopped = true;
   private snapshot: Snapshot | undefined;
-  private validations = new Map<string, AgentValidation>();
+  private rosterConfig: RosterConfig;
+  private bindings: ReadonlyMap<string, SessionBindingRef>;
+  private validations: ReadonlyMap<string, AgentValidation>;
+  private catalogRevision: string | undefined;
+  private catalogProblems: readonly ParseProblem[];
 
   constructor(private readonly options: RuntimeOptions) {
+    this.rosterConfig = options.config;
+    this.bindings = options.bindings ?? new Map();
+    this.validations = options.validations ?? new Map();
+    this.catalogRevision = options.catalogRevision;
+    this.catalogProblems = options.catalogProblems ?? [];
     this.watcher = new ClaudeStateWatcher(options.paths);
+    this.watcher.onChange(() => this.scheduleRefresh());
+    this.watcher.onError((error) => options.onError?.(error));
     this.receiver = new HookReceiver(options.paths, {
       onDelivery: (delivery) => this.handleHook(delivery),
       onError: (err) => options.onError?.(err),
@@ -106,6 +133,39 @@ export class DecagramCouncilRuntime {
   }
 
   /**
+   * Replaces the catalog/profile projection without touching provider-owned
+   * sessions. Definition-watch refreshes and workspace controllers call this
+   * before publishing a new authoritative snapshot.
+   */
+  updateRoster(
+    config: RosterConfig,
+    bindings: ReadonlyMap<string, SessionBindingRef>,
+    validations: ReadonlyMap<string, AgentValidation>,
+    catalogRevision?: string | undefined,
+    catalogProblems: readonly ParseProblem[] = [],
+    schedule = true,
+  ): void {
+    const previousPollInterval = this.rosterConfig.pollIntervalMs;
+    this.rosterConfig = config;
+    this.bindings = bindings;
+    this.validations = validations;
+    this.catalogRevision = catalogRevision;
+    this.catalogProblems = catalogProblems;
+    if (
+      !this.stopped &&
+      previousPollInterval !== this.rosterConfig.pollIntervalMs
+    ) {
+      if (this.timer !== undefined) clearInterval(this.timer);
+      this.timer = setInterval(
+        () => this.scheduleRefresh(),
+        this.rosterConfig.pollIntervalMs,
+      );
+      this.timer.unref();
+    }
+    if (schedule) this.scheduleRefresh();
+  }
+
+  /**
    * Boot sequence: daemon status → roster → diff against config → report.
    *
    * Deliberately stops at reporting. Starting sessions is a separate call, so
@@ -118,7 +178,7 @@ export class DecagramCouncilRuntime {
     const daemon = daemonResult.ok ? daemonResult.value : undefined;
     if (!daemonResult.ok) this.options.onError?.(new Error(daemonResult.message));
 
-    await this.refreshValidations();
+    if (this.validations.size === 0) await this.refreshValidations();
     const snapshot = await this.refresh(daemon);
 
     const invalid = [...this.validations.values()].filter((validation) => !validation.found);
@@ -146,10 +206,9 @@ export class DecagramCouncilRuntime {
       this.options.onError?.(err instanceof Error ? err : new Error(String(err)));
     }
 
-    this.watcher.onChange(() => this.scheduleRefresh());
     this.watcher.start();
 
-    this.timer = setInterval(() => this.scheduleRefresh(), this.options.config.pollIntervalMs);
+    this.timer = setInterval(() => this.scheduleRefresh(), this.rosterConfig.pollIntervalMs);
     this.timer.unref();
   }
 
@@ -161,38 +220,58 @@ export class DecagramCouncilRuntime {
     }
     await this.watcher.stop();
     await this.receiver.stop();
+    await this.refreshTail;
   }
 
   /** Coalesces refreshes so a hook burst produces one roster read, not twenty. */
   scheduleRefresh(): void {
-    if (this.refreshing) {
-      this.queued = true;
+    if (this.scheduledRefresh) {
+      this.refreshDirty = true;
       return;
     }
-    void this.refresh();
+    this.scheduledRefresh = true;
+    this.refreshDirty = false;
+    void this.refresh()
+      .catch((error) => {
+        this.options.onError?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      })
+      .finally(() => {
+        this.scheduledRefresh = false;
+        if (this.refreshDirty && !this.stopped) {
+          this.refreshDirty = false;
+          this.scheduleRefresh();
+        }
+      });
   }
 
   /** Reads all sources and publishes a snapshot. */
-  async refresh(daemon?: DaemonStatus | undefined): Promise<Snapshot> {
-    this.refreshing = true;
-    try {
-      const [rosterResult, jobs, teams] = await Promise.all([
-        this.options.client.listSessions({ all: true }),
-        readJobsSnapshot(this.options.paths),
-        readAllTeams(this.options.paths),
-      ]);
+  refresh(daemon?: DaemonStatus | undefined): Promise<Snapshot> {
+    const result = this.refreshTail.then(
+      () => this.performRefresh(daemon),
+      () => this.performRefresh(daemon),
+    );
+    this.refreshTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
 
-      const snapshot = this.assemble(rosterResult, jobs, teams, daemon);
-      this.snapshot = snapshot;
-      this.options.onSnapshot(snapshot);
-      return snapshot;
-    } finally {
-      this.refreshing = false;
-      if (this.queued) {
-        this.queued = false;
-        if (!this.stopped) void this.refresh();
-      }
-    }
+  private async performRefresh(
+    daemon?: DaemonStatus | undefined,
+  ): Promise<Snapshot> {
+    const [rosterResult, jobs, teams] = await Promise.all([
+      this.options.client.listSessions({ all: true }),
+      readJobsSnapshot(this.options.paths),
+      readAllTeams(this.options.paths),
+    ]);
+
+    const snapshot = this.assemble(rosterResult, jobs, teams, daemon);
+    this.snapshot = snapshot;
+    this.options.onSnapshot(snapshot);
+    return snapshot;
   }
 
   private assemble(
@@ -209,16 +288,26 @@ export class DecagramCouncilRuntime {
       : (this.snapshot?.roster.sessions ?? []);
 
     const roster = buildUnifiedRoster({
-      config: this.options.config,
+      config: this.rosterConfig,
       rosterSessions,
       jobs,
       teams,
       validations: this.validations,
+      bindings: this.bindings,
+      // Absence is authoritative only when the current provider read
+      // succeeded. Retained sessions keep useful stale detail visible after a
+      // transient CLI failure, but they cannot prove that an exact binding is
+      // gone (and therefore safe to clear).
+      rosterAvailable: rosterResult.ok,
     });
 
-    const needsInput = roster.sessions.filter(
-      (session) => session.state === 'blocked' || session.waitingFor !== undefined,
-    );
+    const needsInput = roster.squad
+      .map((slot) => slot.session)
+      .filter(
+        (session): session is Session =>
+          session !== undefined &&
+          (session.state === 'blocked' || session.waitingFor !== undefined),
+      );
 
     return {
       roster,
@@ -227,15 +316,17 @@ export class DecagramCouncilRuntime {
       updatedAt: new Date(),
       needsInput,
       needsWake: membersNeedingWake(roster).length > 0,
+      catalogRevision: this.catalogRevision,
+      catalogProblems: this.catalogProblems,
     };
   }
 
   /** Re-scans subagent definitions so roster typos surface before dispatch. */
   async refreshValidations(): Promise<void> {
     const validations = new Map<string, AgentValidation>();
-    for (const member of this.options.config.members) {
+    for (const member of this.rosterConfig.members) {
       const definitions = await listAgentDefinitions(this.options.paths, member.cwd);
-      validations.set(member.agent, validateAgentName(member.agent, definitions));
+      validations.set(member.key, validateAgentName(member.agent, definitions));
     }
     this.validations = validations;
   }
@@ -252,134 +343,5 @@ export class DecagramCouncilRuntime {
     // Never mutate the snapshot from a hook payload — an event says "something
     // changed", and the CLI says what it changed to.
     this.scheduleRefresh();
-  }
-
-  // ------------------------------------------------------------- squad actions
-
-  /**
-   * Starts a configured specialist.
-   *
-   * Refuses when the member's agent definition is missing, because dispatching
-   * anyway produces a live session running a default template under the
-   * specialist's name — a failure that looks like success.
-   */
-  async startMember(member: RosterMember): Promise<CliResult<StartSessionOutcome>> {
-    const validation = this.validations.get(member.agent);
-    if (validation !== undefined && !validation.found) {
-      return {
-        ok: false,
-        kind: 'cli-error',
-        message: `No subagent definition named "${member.agent}". Create it under .claude/agents/ before starting ${member.label}.`,
-        raw: '',
-        argv: ['--bg', '--agent', member.agent],
-        exitCode: null,
-        durationMs: 0,
-      };
-    }
-
-    const result = await this.options.client.start({
-      agent: member.agent,
-      name: member.label,
-      cwd: member.cwd,
-      prompt: member.bootPrompt ?? `You are ${member.label}. Report in and await instructions.`,
-      model: member.model,
-      effort: member.effort,
-    });
-
-    this.scheduleRefresh();
-    return result;
-  }
-
-  /**
-   * Starts a complete council review through the main-session council lead.
-   *
-   * The question is passed as one argv element by ClaudeClient; no shell
-   * interpolation occurs. The definition is validated immediately because the
-   * council lead is not part of the persistent specialist roster.
-   */
-  async startCouncilReview(
-    question: string,
-    cwd: string,
-  ): Promise<CliResult<StartSessionOutcome>> {
-    if (question.trim() === '') {
-      throw new Error('startCouncilReview() requires a non-empty question');
-    }
-
-    const definitions = await listAgentDefinitions(this.options.paths, cwd);
-    const validation = validateAgentName('council-lead', definitions);
-    if (!validation.found) {
-      return {
-        ok: false,
-        kind: 'cli-error',
-        message: 'No subagent definition named "council-lead".',
-        raw: '',
-        argv: ['--bg', '--agent', 'council-lead'],
-        exitCode: null,
-        durationMs: 0,
-      };
-    }
-
-    const result = await this.options.client.start({
-      agent: 'council-lead',
-      name: 'Council',
-      cwd,
-      prompt: question,
-    });
-    this.scheduleRefresh();
-    return result;
-  }
-
-  /** Starts every configured specialist that has no session. */
-  async startMissing(): Promise<{ member: RosterMember; result: CliResult<StartSessionOutcome> }[]> {
-    const snapshot = this.snapshot ?? (await this.refresh());
-    const missing = membersNeedingStart(snapshot.roster);
-    const results: { member: RosterMember; result: CliResult<StartSessionOutcome> }[] = [];
-    // Sequential: each dispatch may cold-start the supervisor, and five
-    // concurrent cold starts race over the same socket.
-    for (const member of missing) {
-      results.push({ member, result: await this.startMember(member) });
-    }
-    return results;
-  }
-
-  /**
-   * "Wake the squad" — respawns only configured sessions a machine restart left
-   * as `failed`.
-   *
-   * Only ever reached through an explicit user action.
-   */
-  async wakeSquad(): Promise<CliResult<string>> {
-    const snapshot = this.snapshot ?? (await this.refresh());
-    const sessionIds = membersNeedingWake(snapshot.roster)
-      .map((slot) => slot.session?.id)
-      .filter((id): id is string => id !== undefined);
-
-    if (sessionIds.length === 0) {
-      return {
-        ok: true,
-        value: 'No configured agents need waking.',
-        raw: '',
-        argv: ['respawn'],
-        durationMs: 0,
-      };
-    }
-
-    const startedAt = Date.now();
-    const output: string[] = [];
-    for (const id of sessionIds) {
-      const result = await this.options.client.respawn(id);
-      if (!result.ok) return result;
-      output.push(result.value);
-    }
-
-    this.scheduleRefresh();
-    const raw = output.join('\n');
-    return {
-      ok: true,
-      value: `Woke ${sessionIds.length} configured agent${sessionIds.length === 1 ? '' : 's'}.`,
-      raw,
-      argv: ['respawn', ...sessionIds],
-      durationMs: Date.now() - startedAt,
-    };
   }
 }

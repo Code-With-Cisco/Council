@@ -21,6 +21,7 @@ describe('council agent definitions', () => {
     for (const advisor of ADVISORS) {
       const source = await readFile(path.join(AGENT_DIR, `${advisor}.md`), 'utf8');
       const frontmatter = parseFrontmatter(source);
+      expect(frontmatter?.['mode']).toBe('internal');
       expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
       expect(frontmatter?.['permissionMode']).toBeUndefined();
       expect(source).toContain('final output and address nobody');
@@ -32,12 +33,14 @@ describe('council agent definitions', () => {
     const frontmatter = parseFrontmatter(source);
     expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
     expect(frontmatter?.['permissionMode']).toBe('plan');
+    expect(frontmatter?.['mode']).toBe('internal');
   });
 
   it('declares the exact lead-to-advisor allowlist', async () => {
     const source = await readFile(path.join(AGENT_DIR, 'council-lead.md'), 'utf8');
     const frontmatter = parseFrontmatter(source);
     expect(frontmatter?.['name']).toBe('council-lead');
+    expect(frontmatter?.['mode']).toBe('internal');
     expect(frontmatter?.['tools']).toBe(
       'Agent(council-contrarian, council-first-principles, council-expansionist, council-outsider, council-executor, council-chairman), Read, Grep, Glob',
     );

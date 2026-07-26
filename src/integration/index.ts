@@ -87,9 +87,14 @@ export {
   loadRosterConfig,
   mergeDiscoveredAgents,
   parseRosterConfig,
+  RosterConfigStore,
   saveRosterConfig,
 } from './roster/config.js';
-export type { RosterConfigLoad, RosterDiscoveryMerge } from './roster/config.js';
+export type {
+  RosterConfigLoad,
+  RosterConfigStoreLoad,
+  RosterDiscoveryMerge,
+} from './roster/config.js';
 export {
   buildUnifiedRoster,
   membersNeedingStart,

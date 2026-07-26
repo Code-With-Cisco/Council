@@ -1,5 +1,6 @@
 ---
 name: council-first-principles
+mode: internal
 description: >-
   Use as one independent member of an LLM Council when a question may contain
   hidden assumptions, inherited conventions, false constraints, or incorrect

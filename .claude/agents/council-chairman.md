@@ -1,5 +1,6 @@
 ---
 name: council-chairman
+mode: internal
 description: >-
   Use only as the final decision-maker in an LLM Council after five independent
   advisor responses have been anonymized as Responses A through E and a neutral

@@ -219,8 +219,10 @@ export interface StartedSession {
 
 /** A configured or discovered agent launch profile. */
 export interface RosterMember {
-  /** Stable opaque key used by the UI and supervisor. */
+  /** Stable opaque profile id used by the UI and supervisor. */
   readonly key: string;
+  /** Original v1 key, retained only for recoverable migration/display. */
+  readonly legacyKey?: string | undefined;
   /** Human-readable display name. */
   readonly label: string;
   /**
@@ -239,10 +241,25 @@ export interface RosterMember {
   readonly bootPrompt?: string | undefined;
   readonly model?: string | undefined;
   readonly effort?: string | undefined;
+  /** Persisted workspace identity. Legacy v1 profiles may omit this in the file. */
+  readonly workspaceId?: string | undefined;
+  /** Stable inventory identity selected from the resolved catalog. */
+  readonly catalogId?: string | undefined;
+  /** Fingerprint the user saw when this profile was resolved. */
+  readonly definitionFingerprint?: string | undefined;
+  /** True for saved preferences, false for an in-memory discovered profile. */
+  readonly configured?: boolean | undefined;
+  readonly mode?: 'normal' | 'internal' | undefined;
+  readonly visible?: boolean | undefined;
+  readonly order?: number | undefined;
+  /** Stored for forward compatibility. Automatic startup is not performed in Milestone 1. */
+  readonly autoStart?: boolean | undefined;
+  readonly permissionMode?: string | undefined;
 }
 
 export interface RosterConfig {
-  readonly version: 1;
+  /** Source file version after normalization. */
+  readonly version: 1 | 2;
   readonly members: readonly RosterMember[];
   /** Poll interval for `agents --json` reconciliation. Hooks are the fast path. */
   readonly pollIntervalMs: number;
@@ -252,11 +269,46 @@ export interface RosterConfig {
 export interface AgentValidation {
   readonly agent: string;
   readonly found: boolean;
+  readonly catalogId?: string | undefined;
+  readonly fingerprint?: string | undefined;
+  readonly launchable?: boolean | undefined;
+  readonly scope?: 'project' | 'ancestor' | 'user' | undefined;
+  readonly diagnostic?: string | undefined;
   /** Path of the definition file that would win, when found. */
   readonly path: string | undefined;
   /** Other definitions with the same `name`, which resolve by filesystem order. */
   readonly shadowedBy: readonly string[];
+  /** Same-tier conflicting sources when no effective definition was selected. */
+  readonly candidatePaths?: readonly string[] | undefined;
 }
+
+/**
+ * Read-only binding data included in snapshots. The writable binding store
+ * lives in the privileged supervisor layer.
+ */
+export interface SessionBindingRef {
+  readonly providerId: 'claude-code';
+  readonly workspaceId: string;
+  readonly profileId: string;
+  readonly shortSessionId: string;
+  readonly fullSessionId?: string | undefined;
+  readonly uniqueLaunchName: string;
+  readonly agentName: string;
+  readonly catalogId: string;
+  readonly definitionFingerprint: string;
+  readonly requestedCanonicalCwd: string;
+  readonly actualCanonicalCwd?: string | undefined;
+  readonly createdAt: string;
+  readonly lastConfirmedAt: string;
+}
+
+export type ProfileBindingState =
+  | 'none'
+  | 'active'
+  | 'terminal'
+  | 'failed'
+  | 'stale'
+  | 'unavailable';
 
 /** A roster member joined to its live session, if any. This is the squad screen's row. */
 export interface SquadSlot {
@@ -265,6 +317,10 @@ export interface SquadSlot {
   /** True when config declares this member but no session exists for it. */
   readonly missing: boolean;
   readonly validation: AgentValidation | undefined;
+  readonly binding: SessionBindingRef | undefined;
+  readonly bindingState: ProfileBindingState;
+  /** False when no provider roster was available to prove the binding stale. */
+  readonly staleBinding: boolean;
 }
 
 /** Agent-team membership read from `<config>/teams/<team>/config.json`. */

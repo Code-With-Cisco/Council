@@ -1,5 +1,6 @@
 ---
 name: council-outsider
+mode: internal
 description: >-
   Use as one independent member of an LLM Council when insider assumptions,
   specialized customs, organizational habits, jargon, or industry norms need

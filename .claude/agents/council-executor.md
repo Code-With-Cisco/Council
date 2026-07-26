@@ -1,5 +1,6 @@
 ---
 name: council-executor
+mode: internal
 description: >-
   Use as one independent member of an LLM Council when a decision needs an
   immediate, concrete, low-regret first move that can begin today and produce

@@ -1,6 +1,7 @@
 ---
 # IMPORTANT: this agent MUST run as the main session via `claude --agent council-lead`.
 name: council-lead
+mode: internal
 description: >-
   Runs the complete Decagram Council workflow: one evidence packet, five
   independent advisors in parallel, anonymous peer review, and a final

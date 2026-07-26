@@ -1,5 +1,6 @@
 ---
 name: council-expansionist
+mode: internal
 description: >-
   Use as one independent member of an LLM Council when a proposal or decision
   may contain overlooked leverage, strategic upside, adjacent value, scale,

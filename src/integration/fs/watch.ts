@@ -31,6 +31,13 @@ export interface WatchOptions {
   readonly debounceMs?: number | undefined;
 }
 
+type ChangeListener = (changes: readonly StateChange[]) => void;
+type ErrorListener = (error: Error) => void;
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
 /**
  * Watches Claude state and emits coalesced change notifications.
  *
@@ -41,7 +48,8 @@ export class ClaudeStateWatcher {
   private watcher: FSWatcher | undefined;
   private timer: NodeJS.Timeout | undefined;
   private pending = new Map<StateChangeArea, string>();
-  private readonly listeners = new Set<(changes: readonly StateChange[]) => void>();
+  private readonly changeListeners = new Set<ChangeListener>();
+  private readonly errorListeners = new Set<ErrorListener>();
   private readonly debounceMs: number;
 
   constructor(
@@ -51,15 +59,26 @@ export class ClaudeStateWatcher {
     this.debounceMs = options.debounceMs ?? 150;
   }
 
-  onChange(listener: (changes: readonly StateChange[]) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  onChange(listener: ChangeListener): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  /**
+   * Reports native watcher failures without stopping the polling safety net.
+   *
+   * Listener registrations survive stop/start so a runtime can wire its
+   * diagnostics once. Calling the returned function removes the listener.
+   */
+  onError(listener: ErrorListener): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
   }
 
   start(): void {
     if (this.watcher !== undefined) return;
 
-    this.watcher = watch(this.paths.configDir, {
+    const watcher = watch(this.paths.configDir, {
       // jobs/<id>/state.json is three levels below the config root; anything
       // deeper (per-session tmp/ scratch) is noise.
       depth: 3,
@@ -70,19 +89,32 @@ export class ClaudeStateWatcher {
       awaitWriteFinish: { stabilityThreshold: 60, pollInterval: 20 },
       ignored: (target: string) => this.classify(target) === undefined && !this.isAncestor(target),
     });
+    this.watcher = watcher;
 
     const handle = (target: string): void => {
       const area = this.classify(target);
       if (area !== undefined) this.enqueue(area, target);
     };
 
-    this.watcher.on('add', handle);
-    this.watcher.on('change', handle);
-    this.watcher.on('unlink', handle);
-    this.watcher.on('addDir', handle);
-    this.watcher.on('unlinkDir', handle);
+    watcher.on('add', handle);
+    watcher.on('change', handle);
+    watcher.on('unlink', handle);
+    watcher.on('addDir', handle);
+    watcher.on('unlinkDir', handle);
     // A watch error must not take the app down; polling remains the safety net.
-    this.watcher.on('error', () => undefined);
+    watcher.on('error', (error) => {
+      // Ignore a late callback from a watcher that has already been closed.
+      if (watcher !== this.watcher) return;
+      const normalized = asError(error);
+      for (const listener of this.errorListeners) {
+        try {
+          listener(normalized);
+        } catch {
+          // Diagnostic consumers must not turn a recoverable watch failure
+          // into an uncaught EventEmitter error.
+        }
+      }
+    });
   }
 
   async stop(): Promise<void> {
@@ -135,7 +167,7 @@ export class ClaudeStateWatcher {
       this.timer = undefined;
       const changes = [...this.pending].map(([a, p]) => ({ area: a, path: p }));
       this.pending.clear();
-      for (const listener of this.listeners) listener(changes);
+      for (const listener of this.changeListeners) listener(changes);
     }, this.debounceMs);
     this.timer.unref();
   }

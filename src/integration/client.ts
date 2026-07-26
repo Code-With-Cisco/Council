@@ -18,14 +18,21 @@ import type {
 } from './types.js';
 import { runClaude, runClaudeJson, type ExecOptions } from './cli/exec.js';
 import { detectUnknownAgentWarning, summarizeOutput } from './cli/errors.js';
-import { locateClaude, type LocatedCli, type LocateOptions } from './cli/locate.js';
+import {
+  compareVersions,
+  locateClaude,
+  MINIMUM_CLAUDE_VERSION,
+  parseVersion,
+  type LocatedCli,
+  type LocateOptions,
+} from './cli/locate.js';
 import { parseDaemonStatus } from './parse/daemon.js';
 import { parseRoster, parseStartedSession } from './parse/roster.js';
 
 export interface StartSessionRequest {
   /** Subagent definition name. Validate against disk first — an unknown name only warns. */
   readonly agent?: string | undefined;
-  /** Display label. Also how the unified roster links a session to a specialist. */
+  /** App-generated launch name used only for the current launch transaction. */
   readonly name?: string | undefined;
   readonly prompt: string;
   /** Working directory. Required in practice: it decides which project the agent sees. */
@@ -103,6 +110,42 @@ export class ClaudeClient {
 
   private exec(argv: readonly string[], opts: ExecOptions = {}): Promise<CliResult<string>> {
     return runClaude(this.cli.bin, argv, { env: this.env, timeoutMs: this.defaultTimeoutMs, ...opts });
+  }
+
+  /**
+   * Re-probes the executable/version and a roster read immediately before a
+   * launch. The roster command is also the narrowest non-interactive check of
+   * the current authentication/capability state; it never starts a session.
+   */
+  async verifyLaunchCapability(): Promise<CliResult<string>> {
+    const versionResult = await this.exec(['--version'], { timeoutMs: 10_000 });
+    if (!versionResult.ok) return versionResult;
+
+    const version = parseVersion(versionResult.value);
+    if (
+      version !== undefined &&
+      compareVersions(version, MINIMUM_CLAUDE_VERSION) < 0
+    ) {
+      return {
+        ok: false,
+        kind: 'cli-error',
+        message: `Claude Code ${version} is below the supported minimum ${MINIMUM_CLAUDE_VERSION}.`,
+        raw: versionResult.raw,
+        argv: versionResult.argv,
+        exitCode: 0,
+        durationMs: versionResult.durationMs,
+      };
+    }
+
+    const rosterResult = await this.listSessions({ all: true });
+    if (!rosterResult.ok) return rosterResult;
+    return {
+      ok: true,
+      value: version ?? 'version unknown; roster capability confirmed',
+      raw: `${versionResult.raw}\n${rosterResult.raw}`.trim(),
+      argv: versionResult.argv,
+      durationMs: versionResult.durationMs + rosterResult.durationMs,
+    };
   }
 
   // ---------------------------------------------------------------- roster

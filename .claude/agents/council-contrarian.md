@@ -1,5 +1,6 @@
 ---
 name: council-contrarian
+mode: internal
 description: >-
   Use as one independent member of an LLM Council when a decision, proposal,
   plan, strategy, purchase, commitment, or course of action needs a dedicated

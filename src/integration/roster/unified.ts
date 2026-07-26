@@ -17,8 +17,8 @@ import type {
   AgentValidation,
   ParseProblem,
   RosterConfig,
-  RosterMember,
   Session,
+  SessionBindingRef,
   SquadSlot,
   TeamSnapshot,
 } from '../types.js';
@@ -49,42 +49,39 @@ export function mergeSessions(rosterSessions: readonly Session[], jobs: JobsSnap
   return merged;
 }
 
-function normalizeName(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 /**
- * Decides whether a session belongs to a specialist.
+ * Resolves only the exact provider identity persisted by the binding store.
  *
- * Dispatch sets `--name` to the member's label, so the name match is the
- * intended path. The cwd fallback catches sessions the user started from a
- * terminal in the specialist's home directory, which would otherwise show as
- * unassigned while visibly being that specialist's work.
+ * Job-file-only rows are historical evidence, not proof that the provider
+ * roster can address a session. Lifecycle commands all re-read that roster,
+ * so accepting a job-only row here would advertise actions that must fail and
+ * would hide the safe Clear-binding recovery path.
+ *
+ * If a full id is available it is authoritative. We deliberately do not fall
+ * back to the short id when a different full id is visible: short-id
+ * coincidence must never transfer ownership.
  */
-function matchesMember(session: Session, member: RosterMember): boolean {
-  if (session.kind !== 'background') return false;
-
-  if (session.name !== undefined) {
-    const name = normalizeName(session.name);
-    if (name === normalizeName(member.label) || name === normalizeName(member.key)) return true;
+function findBoundSession(
+  sessions: readonly Session[],
+  binding: SessionBindingRef,
+): Session | undefined {
+  if (binding.fullSessionId !== undefined) {
+    const matches = sessions.filter(
+      (session) =>
+        session.kind === 'background' &&
+        session.source !== 'jobfile' &&
+        session.sessionId === binding.fullSessionId &&
+        (session.id === undefined || session.id === binding.shortSessionId),
+    );
+    return matches.length === 1 ? matches[0] : undefined;
   }
-
-  return session.cwd !== undefined && session.cwd === member.cwd && session.name === undefined;
-}
-
-/**
- * Picks one session when several match a specialist.
- *
- * Prefers the most recently started matching background session.
- *
- * Background rows carry no pid in the probed CLI surface, so pid cannot be a
- * meaningful tiebreaker here.
- */
-function pickPrimary(candidates: readonly Session[]): Session | undefined {
-  if (candidates.length <= 1) return candidates[0];
-  return [...candidates].sort(
-    (a, b) => (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0),
-  )[0];
+  const matches = sessions.filter(
+    (session) =>
+      session.kind === 'background' &&
+      session.source !== 'jobfile' &&
+      session.id === binding.shortSessionId,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export interface BuildRosterInput {
@@ -92,8 +89,12 @@ export interface BuildRosterInput {
   readonly rosterSessions: readonly Session[];
   readonly jobs: JobsSnapshot;
   readonly teams: readonly TeamSnapshot[];
-  /** Keyed by agent name. Absent when definitions have not been scanned yet. */
+  /** Keyed by opaque profile id. Absent when definitions have not been scanned yet. */
   readonly validations?: ReadonlyMap<string, AgentValidation> | undefined;
+  /** Exact durable ownership, keyed by opaque profile id. */
+  readonly bindings?: ReadonlyMap<string, SessionBindingRef> | undefined;
+  /** False when the provider roster could not be read at all. */
+  readonly rosterAvailable?: boolean | undefined;
 }
 
 export function buildUnifiedRoster(input: BuildRosterInput): UnifiedRoster {
@@ -101,18 +102,40 @@ export function buildUnifiedRoster(input: BuildRosterInput): UnifiedRoster {
   const claimed = new Set<Session>();
 
   const squad: SquadSlot[] = input.config.members.map((member) => {
-    // A session can belong to only one agent card. The old cwd fallback could
-    // otherwise place the same unnamed job into every profile sharing a project.
-    const candidates = sessions.filter(
-      (session) => !claimed.has(session) && matchesMember(session, member),
-    );
-    const session = pickPrimary(candidates);
+    const candidateBinding = input.bindings?.get(member.key);
+    const binding =
+      candidateBinding !== undefined &&
+      candidateBinding.profileId === member.key &&
+      (member.workspaceId === undefined ||
+        candidateBinding.workspaceId === member.workspaceId)
+        ? candidateBinding
+        : undefined;
+    const exact = binding === undefined ? undefined : findBoundSession(sessions, binding);
+    const session = exact !== undefined && !claimed.has(exact) ? exact : undefined;
     if (session !== undefined) claimed.add(session);
+    const rosterAvailable = input.rosterAvailable !== false;
+    const staleBinding =
+      rosterAvailable && binding !== undefined && session === undefined;
+    const bindingState =
+      binding === undefined
+        ? 'none'
+        : !rosterAvailable
+          ? 'unavailable'
+        : staleBinding
+          ? 'stale'
+          : session?.state === 'failed'
+            ? 'failed'
+            : session?.state === 'done' || session?.state === 'stopped'
+              ? 'terminal'
+              : 'active';
     return {
       member,
       session,
       missing: session === undefined,
-      validation: input.validations?.get(member.agent),
+      validation: input.validations?.get(member.key),
+      binding,
+      bindingState,
+      staleBinding,
     };
   });
 
@@ -133,8 +156,10 @@ export function buildUnifiedRoster(input: BuildRosterInput): UnifiedRoster {
  * session reports `failed`, and that case is a user-visible "wake the squad"
  * action, never an automatic respawn.
  */
-export function membersNeedingStart(roster: UnifiedRoster): RosterMember[] {
-  return roster.squad.filter((slot) => slot.session === undefined).map((slot) => slot.member);
+export function membersNeedingStart(roster: UnifiedRoster): RosterConfig['members'][number][] {
+  return roster.squad
+    .filter((slot) => slot.bindingState === 'none')
+    .map((slot) => slot.member);
 }
 
 /**

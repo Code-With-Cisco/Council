@@ -1,6 +1,7 @@
 'use strict';
 
 const api = window.decagramCouncil;
+const profileActions = window.CouncilSceneViewModel.createProfileActionRouter(api);
 const IDENTITY_COLORS = [
   '#7fa9dc',
   '#d9b36b',
@@ -66,23 +67,47 @@ function activateView(viewName) {
 }
 
 function slotState(slot) {
-  return slot.session?.state ?? (slot.missing ? 'not started' : 'unknown');
+  if (slot.staleBinding) return 'stale binding';
+  if (slot.bindingState === 'unavailable') return 'runtime unavailable';
+  if (slot.session) return slot.session.state ?? (slot.session.cold ? 'cold' : 'idle');
+  if (slot.validation?.launchable === false) {
+    return slot.validation.found ? 'definition blocked' : 'definition missing';
+  }
+  return slot.bindingState === 'none' ? 'not started' : 'unknown';
 }
 
-function officeMode(slot) {
-  if (!slot.session) return 'missing';
-  if (slot.session.state === 'working') return slot.session.cold ? 'cold' : 'working';
-  if (slot.session.state === 'blocked') return 'blocked';
-  if (slot.session.state === 'failed') return 'failed';
-  if (slot.session.state === 'done') return 'done';
-  if (slot.session.state === 'stopped') return 'stopped';
-  return slot.session.cold ? 'cold' : 'idle';
+function visibleSlots(snapshot) {
+  return (snapshot?.roster.squad ?? []).filter((slot) => slot.member.visible !== false);
+}
+
+function canStart(slot) {
+  return actionsFor(slot).start;
+}
+
+function actionsFor(slot) {
+  return window.CouncilSceneViewModel.actionState(slot, {
+    workspaceReady: state?.workspace.status === 'ready',
+    trusted: state?.workspace.trusted === true,
+    definitionStale: state?.snapshot?.definitionError !== undefined,
+    bindingHealthy: state?.bindingProblem === undefined,
+    capabilities: state?.capabilities ?? {},
+  });
+}
+
+function canReply(slot) {
+  return actionsFor(slot).reply;
 }
 
 function statusClass(stateName) {
   if (stateName === 'working' || stateName === 'done') return 'is-good';
   if (stateName === 'blocked') return 'is-warning';
-  if (stateName === 'failed') return 'is-bad';
+  if (
+    stateName === 'failed' ||
+    stateName === 'stale binding' ||
+    stateName.startsWith('definition ')
+  ) {
+    return 'is-bad';
+  }
   return '';
 }
 
@@ -129,11 +154,15 @@ function renderAttention(snapshot) {
 }
 
 function renderOffice(snapshot) {
-  const slots = snapshot?.roster.squad ?? [];
-  const pageCount = Math.max(1, Math.ceil(slots.length / AGENTS_PER_OFFICE));
-  officePage = Math.min(officePage, pageCount - 1);
-  const firstIndex = officePage * AGENTS_PER_OFFICE;
-  const pageSlots = slots.slice(firstIndex, firstIndex + AGENTS_PER_OFFICE);
+  const scene = window.CouncilSceneViewModel.mapSnapshot(snapshot, {
+    page: officePage,
+    perPage: AGENTS_PER_OFFICE,
+    runtimeAvailable: state?.preflight?.claude?.meetsMinimum === true,
+  });
+  const slots = scene.slots;
+  const pageCount = scene.pages;
+  officePage = scene.page;
+  const pageSlots = scene.pageSlots;
   const runningCount = slots.filter((slot) => slot.session?.state === 'working').length;
   const blockedCount = slots.filter((slot) => slot.session?.state === 'blocked').length;
 
@@ -151,11 +180,11 @@ function renderOffice(snapshot) {
         key: slot.member.key,
         label: slot.member.label,
         color: theme.color,
-        mode: officeMode(slot),
+        mode: scene.agents.find((agent) => agent.key === slot.member.key)?.mode ?? 'missing',
       };
     }),
-    connected: state?.preflight.claude?.meetsMinimum === true && snapshot !== undefined,
-    stale: snapshot?.rosterError !== undefined,
+    connected: scene.connected,
+    stale: scene.stale,
     page: officePage + 1,
     pages: pageCount,
   });
@@ -217,11 +246,12 @@ function renderSquad(snapshot) {
   grid.replaceChildren();
 
   if (!snapshot) {
-      grid.append(element('p', 'muted', 'No agent snapshot is available. Open Diagnostics for details.'));
+    grid.append(element('p', 'muted', 'No agent snapshot is available. Open Diagnostics for details.'));
+    renderUnassigned(undefined);
     return;
   }
 
-  for (const slot of snapshot.roster.squad) {
+  for (const slot of visibleSlots(snapshot)) {
     const session = slot.session;
     const theme = identityFor(slot.member.key, slot.member.label);
     const card = element('article', 'specialist-card');
@@ -236,7 +266,7 @@ function renderSquad(snapshot) {
     ident.append(nameBlock);
     heading.append(ident);
 
-    const stateName = session?.state ?? (slot.missing ? 'not started' : 'unknown');
+    const stateName = slotState(slot);
     heading.append(element('span', `state-pill ${statusClass(stateName)}`, stateName));
     card.append(heading);
 
@@ -250,36 +280,95 @@ function renderSquad(snapshot) {
       ),
     );
     if (session?.pinned) status.append(element('span', 'pin-pill', 'Pinned'));
-    if (slot.validation && !slot.validation.found) status.append(element('span', 'state-pill is-bad', 'Agent missing'));
+    if (slot.validation?.launchable === false) {
+      status.append(
+        element(
+          'span',
+          'state-pill is-bad',
+          slot.validation.found ? 'Definition blocked' : 'Agent missing',
+        ),
+      );
+    }
+    if (slot.staleBinding) status.append(element('span', 'state-pill is-warning', 'Stale binding'));
     card.append(status);
 
     const actions = element('div', 'card-actions');
-    if (slot.missing) {
+    if (slot.bindingState === 'none') {
       const start = element('button', 'button button-primary', 'Start');
-      start.disabled = slot.validation?.found === false;
+      start.disabled = !canStart(slot);
       start.addEventListener('click', async () => {
-        await runAction(start, 'Starting…', () => api.startMember(slot.member.key));
+        await runAction(start, 'Starting…', () =>
+          window.CouncilSceneViewModel.invokeProfileStart(slot, profileActions),
+        );
       });
       actions.append(start);
     }
-    if (session?.id) {
-      const details = element('button', 'button', 'Details');
-      details.addEventListener('click', () => {
-        selectedKey = slot.member.key;
-        renderDetail(slot);
-      });
+    const details = element('button', 'button', 'Details');
+    details.addEventListener('click', () => {
+      selectedKey = slot.member.key;
+      renderDetail(slot);
+    });
+    actions.append(details);
+    if (session?.id && slot.bindingState === 'active') {
       const stop = element('button', 'button button-danger', 'Stop');
+      stop.disabled = !actionsFor(slot).stop;
       stop.addEventListener('click', async () => {
-        await runAction(stop, 'Stopping…', () => api.stopSession(session.id));
+        await runAction(stop, 'Stopping…', () => profileActions.stop(slot.member.key));
       });
-      actions.append(details, stop);
+      actions.append(stop);
+    }
+    if (slot.bindingState === 'terminal' || slot.bindingState === 'failed') {
+      const resume = element('button', 'button button-primary', 'Resume');
+      resume.disabled = !actionsFor(slot).resume;
+      resume.addEventListener('click', async () => {
+        await runAction(resume, 'Resuming…', () => profileActions.resume(slot.member.key));
+      });
+      const startNew = element('button', 'button', 'Start new');
+      startNew.disabled = !actionsFor(slot).startNew;
+      startNew.addEventListener('click', async () => {
+        await runAction(startNew, 'Starting…', () =>
+          profileActions.startNew(
+            slot.member.key,
+            slot.validation?.fingerprint,
+          ),
+        );
+      });
+      actions.append(resume, startNew);
+    }
+    if (slot.bindingState === 'stale') {
+      const clear = element('button', 'button', 'Clear binding');
+      clear.disabled = !actionsFor(slot).clear;
+      clear.addEventListener('click', async () => {
+        await runAction(clear, 'Clearing…', () => profileActions.clear(slot.member.key));
+      });
+      actions.append(clear);
     }
     card.append(actions);
     grid.append(card);
   }
 
-  const selected = snapshot.roster.squad.find((slot) => slot.member.key === selectedKey);
+  const selected = visibleSlots(snapshot).find((slot) => slot.member.key === selectedKey);
   if (selected) renderDetail(selected);
+  renderUnassigned(snapshot);
+}
+
+function renderUnassigned(snapshot) {
+  const list = byId('unassigned-sessions');
+  list.replaceChildren();
+  const sessions = snapshot?.roster.unassigned ?? [];
+  if (sessions.length === 0) {
+    list.append(element('li', '', 'No unassigned background sessions.'));
+    return;
+  }
+  for (const session of sessions) {
+    list.append(
+      element(
+        'li',
+        '',
+        `${session.name ?? 'Unnamed'} · ${session.id ?? 'no short id'} · ${session.state ?? 'unknown'} · ${session.cwd ?? 'cwd unknown'}`,
+      ),
+    );
+  }
 }
 
 function appendMeta(list, label, value) {
@@ -290,31 +379,74 @@ function renderDetail(slot) {
   renderAgentDetail(byId('session-detail'), slot, 'SESSION DETAIL');
 }
 
-function renderAgentDetail(panel, slot, kicker) {
+function renderAgentDetail(panel, slot, kicker, options = {}) {
   panel.replaceChildren();
   const session = slot.session;
   panel.append(element('p', 'eyebrow', kicker));
   panel.append(element('h3', '', slot.member.label));
 
   const profile = element('dl', 'detail-meta');
+  appendMeta(profile, 'Profile', slot.member.key);
   appendMeta(profile, 'Definition', slot.member.agent);
   appendMeta(profile, 'Role', slot.member.role);
-  appendMeta(profile, 'Folder', slot.member.cwd);
+  appendMeta(profile, 'Scope', slot.validation?.scope);
+  appendMeta(profile, 'Source', slot.validation?.path);
+  appendMeta(profile, 'Fingerprint', slot.validation?.fingerprint);
+  appendMeta(profile, 'Launch folder', slot.member.cwd);
+  appendMeta(profile, 'Binding', slot.bindingState);
   panel.append(profile);
+  if (slot.validation?.diagnostic) {
+    panel.append(element('p', 'muted', slot.validation.diagnostic));
+  }
+  if (slot.validation?.shadowedBy?.length) {
+    panel.append(
+      element(
+        'p',
+        'muted',
+        `Shadowed definitions: ${slot.validation.shadowedBy.join(' · ')}`,
+      ),
+    );
+  }
+  if (slot.validation?.candidatePaths?.length) {
+    panel.append(
+      element(
+        'p',
+        'muted',
+        `Conflicting definitions: ${slot.validation.candidatePaths.join(' · ')}`,
+      ),
+    );
+  }
 
   if (!session?.id) {
     const message =
-      slot.validation?.found === false
-        ? 'The definition is missing, so this workstation cannot launch.'
-        : 'This agent is available and has not been started.';
+      slot.bindingState === 'unavailable'
+        ? 'Council has an exact durable binding, but the provider roster is unavailable. No stale-binding claim or lifecycle action is available until it reconnects.'
+        : slot.staleBinding
+        ? 'The exact bound session is missing. Clearing this binding will not stop or delete Claude work.'
+        : slot.validation?.launchable === false
+          ? slot.validation.diagnostic ?? 'The definition cannot launch.'
+          : 'This agent is available and has not been started.';
     panel.append(element('p', 'muted', message));
-    const start = element('button', 'button button-primary', 'Start agent');
-    start.disabled =
-      state?.capabilities.start !== true || slot.validation?.found === false;
-    start.addEventListener('click', async () => {
-      await runAction(start, 'Starting…', () => api.startMember(slot.member.key));
-    });
-    panel.append(start);
+    if (slot.bindingState === 'unavailable') {
+      return;
+    }
+    if (slot.staleBinding) {
+      const clear = element('button', 'button', 'Clear binding');
+      clear.disabled = !actionsFor(slot).clear;
+      clear.addEventListener('click', async () => {
+        await runAction(clear, 'Clearing…', () => profileActions.clear(slot.member.key));
+      });
+      panel.append(clear);
+    } else if (options.allowStart !== false) {
+      const start = element('button', 'button button-primary', 'Start agent');
+      start.disabled = !canStart(slot);
+      start.addEventListener('click', async () => {
+        await runAction(start, 'Starting…', () =>
+          window.CouncilSceneViewModel.invokeProfileStart(slot, profileActions),
+        );
+      });
+      panel.append(start);
+    }
     return;
   }
 
@@ -328,31 +460,63 @@ function renderAgentDetail(panel, slot, kicker) {
 
   const log = element('pre', 'log-output', 'Select “Load recent output” to read this session.');
   const load = element('button', 'button', 'Load recent output');
-  load.disabled = state?.capabilities.logs !== true;
+  load.disabled = !actionsFor(slot).logs;
   load.addEventListener('click', async () => {
-    const result = await runAction(load, 'Loading…', () => api.logs(session.id));
+    const result = await runAction(load, 'Loading…', () => profileActions.logs(slot.member.key));
     log.textContent = result?.ok ? result.value || '(No output)' : result?.message ?? 'Unable to load output.';
   });
-  const stop = element('button', 'button button-danger', 'Stop session');
-  stop.disabled = state?.capabilities.stop !== true;
-  stop.addEventListener('click', async () => {
-    await runAction(stop, 'Stopping…', () => api.stopSession(session.id));
-  });
   const actions = element('div', 'card-actions');
-  actions.append(load, stop);
+  actions.append(load);
+  if (slot.bindingState === 'active') {
+    const stop = element('button', 'button button-danger', 'Stop session');
+    stop.disabled = !actionsFor(slot).stop;
+    stop.addEventListener('click', async () => {
+      await runAction(stop, 'Stopping…', () => profileActions.stop(slot.member.key));
+    });
+    actions.append(stop);
+  }
+  if (slot.bindingState === 'terminal' || slot.bindingState === 'failed') {
+    if (options.allowResume !== false) {
+      const resume = element('button', 'button button-primary', 'Resume');
+      resume.disabled = !actionsFor(slot).resume;
+      resume.addEventListener('click', async () => {
+        await runAction(resume, 'Resuming…', () =>
+          profileActions.resume(slot.member.key),
+        );
+      });
+      actions.append(resume);
+    }
+    if (options.allowStartNew !== false) {
+      const startNew = element('button', 'button', 'Start new');
+      startNew.disabled = !actionsFor(slot).startNew;
+      startNew.addEventListener('click', async () => {
+        await runAction(startNew, 'Starting…', () =>
+          profileActions.startNew(
+            slot.member.key,
+            slot.validation?.fingerprint,
+          ),
+        );
+      });
+      actions.append(startNew);
+    }
+  }
   panel.append(actions, log);
 
   const replyRow = element('div', 'reply-row');
   const reply = element('input');
   reply.type = 'text';
-  reply.placeholder = state?.capabilities.plainTextReply
+  reply.placeholder = canReply(slot)
     ? 'Send a plain-text reply'
-    : 'Reply unavailable: terminal bridge missing';
-  reply.disabled = !state?.capabilities.plainTextReply;
+    : session.waitingFor && session.waitingFor !== 'input needed'
+      ? `Reply disabled: waiting for ${session.waitingFor}`
+      : 'Reply unavailable unless waiting for ordinary text input';
+  reply.disabled = !canReply(slot);
   const send = element('button', 'button button-primary', 'Send');
-  send.disabled = !state?.capabilities.plainTextReply;
+  send.disabled = !canReply(slot);
   send.addEventListener('click', async () => {
-    const result = await runAction(send, 'Sending…', () => api.reply(session.id, reply.value));
+    const result = await runAction(send, 'Sending…', () =>
+      profileActions.reply(slot.member.key, reply.value),
+    );
     if (result?.ok) {
       reply.value = '';
       setFeedback(result.value.acknowledged ? 'Reply delivered and acknowledged.' : 'Reply delivered.');
@@ -363,6 +527,43 @@ function renderAgentDetail(panel, slot, kicker) {
   });
   replyRow.append(reply, send);
   panel.append(replyRow);
+}
+
+function renderCouncil(snapshot) {
+  const panel = byId('council-session');
+  const slot = window.CouncilSceneViewModel.findCouncilSlot(snapshot);
+  if (slot === undefined) {
+    panel.replaceChildren(
+      element('p', 'eyebrow', 'COUNCIL SESSION'),
+      element('h3', '', 'Council lead unavailable'),
+      element(
+        'p',
+        'muted',
+        'A launchable explicitly internal council-lead definition is required.',
+      ),
+    );
+  } else {
+    renderAgentDetail(panel, slot, 'COUNCIL SESSION', {
+      allowStart: false,
+      allowStartNew: false,
+    });
+  }
+
+  const councilButton = byId('council-form').querySelector(
+    'button[type="submit"]',
+  );
+  const fingerprint = slot?.validation?.fingerprint;
+  const definitionReady =
+    slot?.validation?.launchable === true &&
+    /^[0-9a-f]{64}$/.test(fingerprint ?? '');
+  councilButton.disabled =
+    state?.capabilities.councilReview !== true ||
+    snapshot?.definitionError !== undefined ||
+    !definitionReady;
+  councilButton.textContent =
+    slot?.bindingState === 'none'
+      ? 'Start council review'
+      : 'Start new council review';
 }
 
 function diagnosticCard(label, value, detail, tone) {
@@ -377,35 +578,61 @@ function renderDiagnostics() {
   if (!state) return;
   const p = state.preflight;
   const snapshot = state.snapshot;
+  const grid = byId('diagnostics-grid');
+  if (!p) {
+    grid.replaceChildren(
+      diagnosticCard(
+        'Workspace',
+        state.workspace.status === 'setup' ? 'Setup required' : 'Unavailable',
+        state.workspace.diagnostic ?? 'Choose and trust a repository to run preflight.',
+        'is-warning',
+      ),
+      diagnosticCard(
+        'Configuration',
+        state.bindingProblem ? 'Needs attention' : 'Ready for setup',
+        state.bindingProblem?.message ?? 'No runtime has been initialized.',
+        state.bindingProblem ? 'is-warning' : '',
+      ),
+    );
+    byId('preflight-time').textContent = '';
+    const list = byId('startup-messages');
+    list.replaceChildren();
+    const messages = [...state.startupMessages];
+    if (messages.length === 0) messages.push('No startup problems reported.');
+    messages.forEach((message) => list.append(element('li', '', message)));
+    return;
+  }
   const daemon = snapshot?.daemon;
   const daemonValue = !daemon ? 'Unavailable' : !daemon.recognized ? 'Unknown' : daemon.running ? 'Running' : 'Resting';
   const daemonTone = !daemon || !daemon.recognized ? 'is-warning' : daemon.running ? 'is-good' : '';
   const guard = p.guardSelfTest;
   const guardPassed = guard.status === 'passed';
   const claudeUsable = p.claude?.meetsMinimum === true;
-  const hookCount = Object.values(p.hookConfig)
-    .flatMap((groups) => groups ?? [])
-    .reduce((count, group) => count + (group.hooks?.length ?? 0), 0);
-  const grid = byId('diagnostics-grid');
+  const hookCount = p.hookHandlerCount;
   grid.replaceChildren(
     diagnosticCard('Platform', p.supportedPlatform ? 'Windows supported' : `Unsupported: ${p.platform}`, 'Windows 10 or Windows 11 is required.', p.supportedPlatform ? 'is-good' : 'is-bad'),
-    diagnosticCard('Claude CLI', !p.claude ? 'Not found' : claudeUsable ? 'Found' : 'Version too old', p.claude ? `${p.claude.bin}${p.claude.version ? ` · ${p.claude.version}` : ''} · ${p.claude.discoveredVia}` : 'Install Claude Code for Windows or configure an override.', claudeUsable ? 'is-good' : 'is-bad'),
-    diagnosticCard('PowerShell', p.powershell.available ? 'Available' : 'Missing', p.powershell.available ? `${p.powershell.executable} · ${p.powershell.version ?? 'version unknown'}` : 'Guard hooks require PowerShell.', p.powershell.available ? 'is-good' : 'is-bad'),
+    diagnosticCard('Claude CLI', !p.claude ? 'Not found' : claudeUsable ? 'Found' : 'Version too old', p.claude ? `${p.claude.version ?? 'version unknown'} · ${p.claude.discoveredVia}` : 'Install Claude Code for Windows or configure an override.', claudeUsable ? 'is-good' : 'is-bad'),
+    diagnosticCard('PowerShell', p.powershell.available ? 'Available' : 'Missing', p.powershell.available ? `${p.powershell.version ?? 'version unknown'} · ${p.powershell.discoveredVia}` : 'Guard hooks require PowerShell.', p.powershell.available ? 'is-good' : 'is-bad'),
     diagnosticCard('Guard self-test', guardPassed ? 'Passed' : guard.status === 'failed' ? 'Failed' : 'Not verified', guardPassed ? 'Windows write and shell guards accepted their safety cases.' : guard.message, guardPassed ? 'is-good' : guard.status === 'failed' ? 'is-bad' : 'is-warning'),
-    diagnosticCard('Git', p.git.available ? 'Available' : 'Missing', p.git.available ? `${p.git.executable} · ${p.git.version ?? 'version unknown'}` : 'Git for Windows is required.', p.git.available ? 'is-good' : 'is-bad'),
-    diagnosticCard('Node.js', p.node.available ? 'Available' : 'Missing', `${p.node.executable ?? 'unresolved'} · ${p.node.version ?? 'version unknown'}`, p.node.available ? 'is-good' : 'is-bad'),
+    diagnosticCard('Git', p.git.available ? 'Available' : 'Missing', p.git.available ? `${p.git.version ?? 'version unknown'} · ${p.git.discoveredVia}` : 'Git for Windows is required.', p.git.available ? 'is-good' : 'is-bad'),
+    diagnosticCard('Node.js', p.node.available ? 'Available' : 'Missing', `${p.node.version ?? 'version unknown'} · ${p.node.discoveredVia}`, p.node.available ? 'is-good' : 'is-bad'),
     diagnosticCard('Hook registration', `${hookCount} Windows handlers`, 'Edit|Write, PowerShell, TaskCompleted, and TeammateIdle are generated from one configuration.', hookCount === 4 ? 'is-good' : 'is-warning'),
     diagnosticCard('Terminal bridge', p.ptyAvailable ? 'Available' : 'Logs only', p.ptyAvailable ? 'Direct plain-text replies are enabled.' : 'Install the optional node-pty module to enable replies.', p.ptyAvailable ? 'is-good' : 'is-warning'),
     diagnosticCard('Claude daemon', daemonValue, daemon?.raw || 'No verified daemon status has been read.', daemonTone),
-    diagnosticCard('Agent catalog', snapshot ? `${snapshot.roster.squad.length} agents` : 'Unavailable', state.rosterProblems.length ? state.rosterProblems.join(' · ') : 'Definitions and preferences parsed without reported problems.', state.rosterProblems.length ? 'is-warning' : 'is-good'),
-    diagnosticCard('Project folder', state.projectDir, 'Override with DECAGRAM_COUNCIL_PROJECT_DIR before launch.'),
+    diagnosticCard('Agent catalog', state.catalog ? `${state.catalog.entries.length} definitions` : 'Unavailable', [...state.rosterProblems, ...(state.catalog?.diagnostics.map((problem) => problem.message) ?? [])].join(' · ') || 'Definitions and preferences parsed without reported problems.', state.rosterProblems.length || state.catalog?.diagnostics.length ? 'is-warning' : 'is-good'),
+    diagnosticCard('Workspace', state.workspace.label ?? 'Unavailable', `${state.projectDir ?? 'No canonical path'}${state.workspace.developmentOverride ? ' · development override' : ''}`, state.workspace.status === 'ready' ? 'is-good' : 'is-warning'),
+    diagnosticCard('Session bindings', state.bindingProblem ? 'Needs attention' : 'Loaded', state.bindingProblem?.message ?? 'Exact profile ownership store parsed without reported problems.', state.bindingProblem ? 'is-warning' : 'is-good'),
   );
 
   byId('preflight-time').textContent = `Checked ${humanDate(p.checkedAt)}`;
   const messages = [...state.startupMessages];
   if (snapshot?.rosterError) messages.push(snapshot.rosterError.message);
+  if (snapshot?.definitionError) messages.push(snapshot.definitionError);
   if (snapshot?.roster.problems.length) {
     messages.push(...snapshot.roster.problems.map((problem) => `${problem.path}: ${problem.message}`));
+  }
+  if (snapshot?.catalogProblems.length) {
+    messages.push(...snapshot.catalogProblems.map((problem) => `${problem.path}: ${problem.message}`));
   }
   const list = byId('startup-messages');
   list.replaceChildren();
@@ -413,24 +640,57 @@ function renderDiagnostics() {
   else messages.forEach((message) => list.append(element('li', '', message)));
 }
 
+function renderWorkspace() {
+  const workspace = state?.workspace;
+  const ready = workspace?.status === 'ready' && workspace.trusted;
+  byId('workspace-setup').hidden = ready;
+  document.querySelector('.tabs').hidden = !ready;
+  document.querySelector('main').hidden = false;
+  byId('workspace-label').textContent = workspace?.label ?? 'No workspace';
+  byId('change-workspace-button').textContent = ready ? 'Change workspace' : 'Choose workspace';
+  if (!ready) {
+    activeView = 'diagnostics';
+    document.querySelectorAll('.view').forEach((view) => {
+      view.classList.toggle('is-active', view.id === 'view-diagnostics');
+    });
+    byId('workspace-setup-title').textContent =
+      workspace?.status === 'invalid' ? 'Workspace needs attention' : 'Choose a repository';
+    byId('workspace-setup-detail').textContent =
+      workspace?.diagnostic ??
+      'Council needs a trusted repository before it can discover or launch agent instructions.';
+  }
+}
+
 function render() {
   const snapshot = state?.snapshot;
   const connection = byId('connection-state');
-  if (!state?.preflight.claude || !state.preflight.claude.meetsMinimum) {
+  renderWorkspace();
+  if (state?.workspace.status !== 'ready') {
+    connection.textContent = 'Workspace required';
+    connection.className = 'connection-pill is-warning';
+  } else if (!state?.preflight?.claude || !state.preflight.claude.meetsMinimum) {
     connection.textContent = 'Claude unavailable';
     connection.className = 'connection-pill is-bad';
   } else if (!snapshot) {
     connection.textContent = 'Connecting…';
     connection.className = 'connection-pill is-warning';
   } else {
-    connection.textContent = snapshot.rosterError ? 'Roster stale' : 'Connected';
-    connection.className = `connection-pill ${snapshot.rosterError ? 'is-warning' : 'is-good'}`;
+    connection.textContent = snapshot.rosterError
+      ? 'Roster stale'
+      : snapshot.definitionError
+        ? 'Definitions stale'
+        : 'Connected';
+    connection.className = `connection-pill ${
+      snapshot.rosterError || snapshot.definitionError ? 'is-warning' : 'is-good'
+    }`;
   }
   byId('updated-at').textContent = snapshot ? `Updated ${humanDate(snapshot.updatedAt)}` : '';
   byId('wake-button').hidden = !snapshot?.needsWake;
+  byId('wake-button').disabled = state?.capabilities.start !== true;
   renderAttention(snapshot);
   renderOffice(snapshot);
   renderSquad(snapshot);
+  renderCouncil(snapshot);
   renderDiagnostics();
 }
 
@@ -439,6 +699,31 @@ for (const tab of document.querySelectorAll('.tab')) {
     activateView(tab.dataset.view);
   });
 }
+
+async function chooseWorkspace() {
+  const button = byId('change-workspace-button');
+  const setupButton = byId('workspace-setup-button');
+  button.disabled = true;
+  setupButton.disabled = true;
+  try {
+    const result = await api.chooseWorkspace();
+    if (!result.ok) {
+      setFeedback(result.message);
+      return;
+    }
+    state = result.value;
+    byId('council-project').textContent = state.projectDir ?? 'No workspace';
+    render();
+  } catch (error) {
+    setFeedback(error instanceof Error ? error.message : String(error));
+  } finally {
+    button.disabled = false;
+    setupButton.disabled = false;
+  }
+}
+
+byId('change-workspace-button').addEventListener('click', chooseWorkspace);
+byId('workspace-setup-button').addEventListener('click', chooseWorkspace);
 
 officeRenderer = window.CouncilPixelOffice.create(byId('pixel-office'), {
   onAgentSelected(key) {
@@ -487,8 +772,14 @@ byId('council-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector('button[type="submit"]');
   const feedback = byId('council-feedback');
+  const councilSlot = window.CouncilSceneViewModel.findCouncilSlot(
+    state?.snapshot,
+  );
   const result = await runAction(button, 'Convening…', () =>
-    api.council(byId('council-question').value),
+    api.council(
+      byId('council-question').value,
+      councilSlot?.validation?.fingerprint,
+    ),
   );
   feedback.textContent = result?.ok
     ? `Council started as session ${result.value.id}.`
@@ -501,10 +792,16 @@ api.onSnapshot((snapshot) => {
   render();
 });
 
+api.onState((nextState) => {
+  state = nextState;
+  byId('council-project').textContent = nextState.projectDir ?? 'No workspace';
+  render();
+});
+
 api.getState()
   .then((initial) => {
     state = initial;
-    byId('council-project').textContent = initial.projectDir;
+    byId('council-project').textContent = initial.projectDir ?? 'No workspace';
     render();
   })
   .catch((error) => {

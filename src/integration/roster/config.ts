@@ -11,8 +11,14 @@
  * model overrides, and intentionally persistent profiles.
  */
 
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
+import {
+  generatedProfileKind,
+  isValidProfileId,
+} from '../../profileIdentity.js';
+import { writeJsonAtomic } from '../../config/atomicJson.js';
 import type { AgentDefinition } from '../fs/agentDefs.js';
 import type { RosterConfig, RosterMember } from '../types.js';
 
@@ -31,7 +37,7 @@ export const DEFAULT_POLL_INTERVAL_MS = 10_000;
  */
 export function defaultRosterConfig(_homeProject: string): RosterConfig {
   return {
-    version: 1,
+    version: 2,
     members: [],
     pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
   };
@@ -72,13 +78,21 @@ function isGeneratedLegacyPlaceholderRoster(members: readonly RosterMember[]): b
     members.length === LEGACY_PLACEHOLDER_AGENTS.size &&
     members.every(
       (member) =>
-        member.key === member.agent &&
+        (member.legacyKey ?? member.key) === member.agent &&
         LEGACY_PLACEHOLDER_AGENTS.has(member.agent) &&
         member.bootPrompt === undefined &&
         member.model === undefined &&
         member.effort === undefined,
     )
   );
+}
+
+function opaqueId(prefix: string, ...parts: readonly string[]): string {
+  const digest = createHash('sha256')
+    .update(parts.join('\u0000'))
+    .digest('hex')
+    .slice(0, 24);
+  return `${prefix}-${digest}`;
 }
 
 /**
@@ -110,13 +124,10 @@ export function mergeDiscoveredAgents(
   for (const definition of [...effective.values()].sort((a, b) => a.name.localeCompare(b.name))) {
     if (represented.has(definition.name)) continue;
 
-    const baseKey = `agent:${definition.name}`;
-    let key = baseKey;
+    const catalogId = opaqueId('catalog', path.resolve(projectDir), definition.name);
+    let key = opaqueId('profile-virtual', catalogId);
     let suffix = 2;
-    while (usedKeys.has(key)) {
-      key = `${baseKey}:${suffix}`;
-      suffix += 1;
-    }
+    while (usedKeys.has(key)) key = `${opaqueId('profile-virtual', catalogId)}-${suffix++}`;
 
     const role = roleSummary(definition.description);
     const member: RosterMember = {
@@ -124,6 +135,12 @@ export function mergeDiscoveredAgents(
       label: displayName(definition.name),
       agent: definition.name,
       cwd: path.resolve(projectDir),
+      catalogId,
+      configured: false,
+      mode: 'normal',
+      visible: true,
+      order: configured.length,
+      autoStart: false,
       ...(role === undefined ? {} : { role }),
       ...(definition.model === undefined ? {} : { model: definition.model }),
     };
@@ -155,7 +172,59 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
-function coerceMember(value: unknown, index: number, problems: string[]): RosterMember | undefined {
+function optionalString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  location: string,
+  problems: string[],
+): string | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    problems.push(`${location} has a non-string "${key}"`);
+    return undefined;
+  }
+  return asString(value);
+}
+
+function optionalBoolean(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+  fallback: boolean,
+  location: string,
+  problems: string[],
+): boolean {
+  const value = record[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== 'boolean') {
+    problems.push(`${location} has a non-boolean "${key}"`);
+    return fallback;
+  }
+  return value;
+}
+
+function optionalOrder(
+  record: Readonly<Record<string, unknown>>,
+  fallback: number,
+  location: string,
+  problems: string[],
+): number {
+  const value = record['order'];
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    problems.push(`${location} has an invalid non-negative integer "order"`);
+    return fallback;
+  }
+  return value;
+}
+
+function coerceV1Member(
+  value: unknown,
+  index: number,
+  problems: string[],
+  homeProject: string,
+  workspaceId: string,
+): RosterMember | undefined {
   if (typeof value !== 'object' || value === null) {
     problems.push(`members[${index}] is not an object`);
     return undefined;
@@ -179,37 +248,136 @@ function coerceMember(value: unknown, index: number, problems: string[]): Roster
   }
 
   return {
-    key,
+    key: opaqueId('profile-v1', workspaceId, key),
+    legacyKey: key,
     label: asString(record['label']) ?? key,
     agent,
-    cwd: path.resolve(cwd),
+    // Resolve relative legacy paths against the selected workspace, never the
+    // packaged application's current working directory.
+    cwd: path.resolve(homeProject, cwd),
     role: asString(record['role']),
     bootPrompt: asString(record['bootPrompt']),
     model: asString(record['model']),
     effort: asString(record['effort']),
+    workspaceId,
+    configured: true,
+    mode: 'normal',
+    visible: true,
+    order: index,
+    autoStart: false,
   };
 }
 
-export function parseRosterConfig(value: unknown, fallback: RosterConfig): RosterConfigLoad {
+function coerceV2Profile(
+  value: unknown,
+  index: number,
+  problems: string[],
+  homeProject: string,
+): RosterMember | undefined {
+  if (typeof value !== 'object' || value === null) {
+    problems.push(`profiles[${index}] is not an object`);
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = asString(record['id']);
+  const workspaceId = asString(record['workspaceId']);
+  const catalogId = asString(record['catalogId']);
+  const agent = asString(record['agentName']) ?? asString(record['agent']);
+  if (!isValidProfileId(id)) {
+    problems.push(`profiles[${index}] has an invalid opaque "id"`);
+    return undefined;
+  }
+  const reservedKind = generatedProfileKind(id);
+  if (reservedKind !== undefined) {
+    problems.push(
+      `profiles[${index}] ("${id}") uses the reserved generated ${reservedKind} profile namespace`,
+    );
+    return undefined;
+  }
+  if (workspaceId === undefined) {
+    problems.push(`profiles[${index}] ("${id}") is missing "workspaceId"`);
+    return undefined;
+  }
+  if (catalogId === undefined) {
+    problems.push(`profiles[${index}] ("${id}") is missing "catalogId"`);
+    return undefined;
+  }
+  if (agent === undefined) {
+    problems.push(`profiles[${index}] ("${id}") is missing "agentName"`);
+    return undefined;
+  }
+  const mode = record['mode'];
+  if (mode !== undefined && mode !== 'normal' && mode !== 'internal') {
+    problems.push(`profiles[${index}] ("${id}") has an invalid "mode"`);
+    return undefined;
+  }
+  const location = `profiles[${index}] ("${id}")`;
+  return {
+    key: id,
+    label: optionalString(record, 'label', location, problems) ?? agent,
+    agent,
+    cwd: path.resolve(homeProject),
+    role: optionalString(record, 'role', location, problems),
+    bootPrompt: optionalString(record, 'bootPrompt', location, problems),
+    model: optionalString(record, 'model', location, problems),
+    effort: optionalString(record, 'effort', location, problems),
+    workspaceId,
+    catalogId,
+    configured: true,
+    mode: mode ?? 'normal',
+    visible: optionalBoolean(record, 'visible', true, location, problems),
+    order: optionalOrder(record, index, location, problems),
+    autoStart: optionalBoolean(record, 'autoStart', false, location, problems),
+    permissionMode: optionalString(record, 'permissionMode', location, problems),
+    definitionFingerprint: optionalString(
+      record,
+      'definitionFingerprint',
+      location,
+      problems,
+    ),
+  };
+}
+
+export function parseRosterConfig(
+  value: unknown,
+  fallback: RosterConfig,
+  homeProject = '.',
+  workspaceId = 'workspace-legacy',
+): RosterConfigLoad {
   const problems: string[] = [];
   if (typeof value !== 'object' || value === null) {
     return { config: fallback, problems: ['roster config is not a JSON object'], createdDefault: false };
   }
 
   const record = value as Record<string, unknown>;
-  const rawMembers = record['members'];
+  const version = record['version'] === undefined ? 1 : record['version'];
+  if (version !== 1 && version !== 2) {
+    return {
+      config: fallback,
+      problems: [`unsupported roster config version "${String(version)}"`],
+      createdDefault: false,
+    };
+  }
+  const rawMembers = version === 1 ? record['members'] : record['profiles'];
   if (!Array.isArray(rawMembers)) {
-    return { config: fallback, problems: ['roster config has no "members" array'], createdDefault: false };
+    return {
+      config: fallback,
+      problems: [`roster config has no "${version === 1 ? 'members' : 'profiles'}" array`],
+      createdDefault: false,
+    };
   }
 
   const members: RosterMember[] = [];
   const seen = new Set<string>();
   rawMembers.forEach((entry, index) => {
-    const member = coerceMember(entry, index, problems);
+    const member =
+      version === 1
+        ? coerceV1Member(entry, index, problems, homeProject, workspaceId)
+        : coerceV2Profile(entry, index, problems, homeProject);
     if (member === undefined) return;
     // Duplicate keys would make two cards fight over one identity slot.
     if (seen.has(member.key)) {
-      problems.push(`duplicate member key "${member.key}" — keeping the first`);
+      problems.push(`duplicate profile id "${member.key}" — keeping the first`);
       return;
     }
     seen.add(member.key);
@@ -231,11 +399,25 @@ export function parseRosterConfig(value: unknown, fallback: RosterConfig): Roste
     problems.push(`pollIntervalMs must be a number >= 1000; using ${DEFAULT_POLL_INTERVAL_MS}`);
   }
 
-  return { config: { version: 1, members, pollIntervalMs }, problems, createdDefault: false };
+  return {
+    config: {
+      version,
+      members: [...members].sort(
+        (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.key.localeCompare(b.key),
+      ),
+      pollIntervalMs,
+    },
+    problems,
+    createdDefault: false,
+  };
 }
 
-/** Loads the config, writing a default on first run so the file always exists to edit. */
-export async function loadRosterConfig(file: string, homeProject: string): Promise<RosterConfigLoad> {
+/** Loads preferences without persisting a new schema merely because the app opened. */
+export async function loadRosterConfig(
+  file: string,
+  homeProject: string,
+  workspaceId = 'workspace-legacy',
+): Promise<RosterConfigLoad> {
   const fallback = defaultRosterConfig(homeProject);
 
   let text: string;
@@ -243,8 +425,7 @@ export async function loadRosterConfig(file: string, homeProject: string): Promi
     text = await readFile(file, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      await saveRosterConfig(file, fallback);
-      return { config: fallback, problems: [], createdDefault: true };
+      return { config: fallback, problems: [], createdDefault: false };
     }
     return {
       config: fallback,
@@ -254,7 +435,7 @@ export async function loadRosterConfig(file: string, homeProject: string): Promi
   }
 
   try {
-    return parseRosterConfig(JSON.parse(text), fallback);
+    return parseRosterConfig(JSON.parse(text), fallback, homeProject, workspaceId);
   } catch (err) {
     return {
       config: fallback,
@@ -265,9 +446,261 @@ export async function loadRosterConfig(file: string, homeProject: string): Promi
 }
 
 /** Writes via a temp file and rename, so a crash mid-write cannot truncate the user's config. */
+function persistedRosterConfig(config: RosterConfig): unknown {
+  return (
+    config.version === 1
+      ? {
+          version: 1,
+          members: config.members.map((member) => ({
+            key: member.legacyKey ?? member.key,
+            label: member.label,
+            agent: member.agent,
+            cwd: member.cwd,
+            ...(member.role === undefined ? {} : { role: member.role }),
+            ...(member.bootPrompt === undefined ? {} : { bootPrompt: member.bootPrompt }),
+            ...(member.model === undefined ? {} : { model: member.model }),
+            ...(member.effort === undefined ? {} : { effort: member.effort }),
+          })),
+          pollIntervalMs: config.pollIntervalMs,
+        }
+      : {
+          version: 2,
+          profiles: config.members
+            .filter((member) => member.configured !== false)
+            .map((member, index) => ({
+              id: member.key,
+              workspaceId: member.workspaceId,
+              catalogId: member.catalogId,
+              agentName: member.agent,
+              label: member.label,
+              order: member.order ?? index,
+              visible: member.visible ?? true,
+              mode: member.mode ?? 'normal',
+              autoStart: member.autoStart ?? false,
+              ...(member.role === undefined ? {} : { role: member.role }),
+              ...(member.bootPrompt === undefined ? {} : { bootPrompt: member.bootPrompt }),
+              ...(member.model === undefined ? {} : { model: member.model }),
+              ...(member.effort === undefined ? {} : { effort: member.effort }),
+              ...(member.permissionMode === undefined
+                ? {}
+                : { permissionMode: member.permissionMode }),
+              ...(member.definitionFingerprint === undefined
+                ? {}
+                : { definitionFingerprint: member.definitionFingerprint }),
+            })),
+          pollIntervalMs: config.pollIntervalMs,
+        }
+  );
+}
+
+function rosterConfigRevision(config: RosterConfig): string {
+  return createHash('sha256')
+    .update(JSON.stringify(persistedRosterConfig(config)))
+    .digest('hex');
+}
+
 export async function saveRosterConfig(file: string, config: RosterConfig): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.tmp`;
-  await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
-  await rename(temp, file);
+  await writeJsonAtomic(file, persistedRosterConfig(config));
+}
+
+export interface RosterConfigStoreLoad extends RosterConfigLoad {
+  readonly source: 'disk' | 'missing' | 'last-known-good' | 'safe-default';
+  readonly writeBlocked: boolean;
+}
+
+export interface RosterConfigStoreOptions {
+  readonly readText?: ((file: string) => Promise<string>) | undefined;
+  readonly writeConfig?: ((file: string, config: RosterConfig) => Promise<void>) | undefined;
+}
+
+export class RosterConfigWriteBlockedError extends Error {
+  override readonly name = 'RosterConfigWriteBlockedError';
+}
+
+/**
+ * Stateful profile-preference store. A malformed external edit leaves the
+ * active normalized profiles untouched and blocks writes until a valid reload.
+ */
+export class RosterConfigStore {
+  private configValue: RosterConfig;
+  private problemsValue: readonly string[] = [];
+  private hasKnownGood = false;
+  private blocked = false;
+  private diskStateKnown = false;
+  private diskExists = false;
+  private diskRevision: string | undefined;
+  private readonly readText: (file: string) => Promise<string>;
+  private readonly writeConfig: (file: string, config: RosterConfig) => Promise<void>;
+
+  constructor(
+    readonly file: string,
+    readonly homeProject: string,
+    readonly workspaceId: string,
+    options: RosterConfigStoreOptions = {},
+  ) {
+    this.configValue = defaultRosterConfig(homeProject);
+    this.readText = options.readText ?? ((target) => readFile(target, 'utf8'));
+    this.writeConfig = options.writeConfig ?? saveRosterConfig;
+  }
+
+  get current(): RosterConfig {
+    return this.configValue;
+  }
+
+  get problems(): readonly string[] {
+    return this.problemsValue;
+  }
+
+  get writeBlocked(): boolean {
+    return this.blocked;
+  }
+
+  async load(): Promise<RosterConfigStoreLoad> {
+    let text: string;
+    try {
+      text = await this.readText(this.file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const fallback = defaultRosterConfig(this.homeProject);
+        this.configValue = fallback;
+        this.problemsValue = [];
+        this.hasKnownGood = true;
+        this.blocked = false;
+        this.diskStateKnown = true;
+        this.diskExists = false;
+        this.diskRevision = undefined;
+        return {
+          config: fallback,
+          problems: [],
+          createdDefault: false,
+          source: 'missing',
+          writeBlocked: false,
+        };
+      }
+      return this.retain(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch (error) {
+      return this.retain(
+        `roster config is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const fallback = this.configValue;
+    const parsed = parseRosterConfig(
+      raw,
+      fallback,
+      this.homeProject,
+      this.workspaceId,
+    );
+    // Any schema problem makes the complete edit untrusted. Partial recovery
+    // would silently drop or rewrite the malformed profile on a later save.
+    if (parsed.problems.length > 0) {
+      return this.retain(parsed.problems.join(' · '));
+    }
+    this.configValue = parsed.config;
+    this.problemsValue = parsed.problems;
+    this.hasKnownGood = true;
+    this.blocked = false;
+    this.diskStateKnown = true;
+    this.diskExists = true;
+    this.diskRevision = rosterConfigRevision(parsed.config);
+    return {
+      ...parsed,
+      source: 'disk',
+      writeBlocked: false,
+    };
+  }
+
+  reload(): Promise<RosterConfigStoreLoad> {
+    return this.load();
+  }
+
+  async save(config: RosterConfig): Promise<void> {
+    if (this.blocked) {
+      throw new RosterConfigWriteBlockedError(
+        `Refusing to overwrite profile preferences at ${this.file}.`,
+      );
+    }
+
+    let currentDiskRevision: string | undefined;
+    let currentDiskExists = false;
+    try {
+      const text = await this.readText(this.file);
+      currentDiskExists = true;
+      const parsed = parseRosterConfig(
+        JSON.parse(text) as unknown,
+        this.configValue,
+        this.homeProject,
+        this.workspaceId,
+      );
+      // Parsing is intentionally all-or-nothing here. parseRosterConfig also
+      // returns a sanitized projection for diagnostics, but that projection is
+      // never evidence that the externally edited bytes are safe to replace.
+      if (parsed.problems.length > 0) {
+        this.retain(parsed.problems.join(' · '));
+        throw new RosterConfigWriteBlockedError(
+          `Refusing to overwrite malformed profile preferences at ${this.file}.`,
+        );
+      }
+      currentDiskRevision = rosterConfigRevision(parsed.config);
+    } catch (error) {
+      if (error instanceof RosterConfigWriteBlockedError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.retain(error instanceof Error ? error.message : String(error));
+        throw new RosterConfigWriteBlockedError(
+          `Refusing to overwrite unreadable profile preferences at ${this.file}.`,
+        );
+      }
+    }
+
+    // Compare the strict current document with the state observed by load (or
+    // the preceding successful save). This prevents a valid external edit or
+    // delete/create race from being lost to a save derived from stale memory.
+    if (
+      this.diskStateKnown &&
+      (currentDiskExists !== this.diskExists ||
+        currentDiskRevision !== this.diskRevision)
+    ) {
+      this.retain(
+        `Profile preferences changed externally at ${this.file}; reload before saving.`,
+      );
+      throw new RosterConfigWriteBlockedError(
+        `Refusing to overwrite externally changed profile preferences at ${this.file}.`,
+      );
+    }
+    if (!this.diskStateKnown && currentDiskExists) {
+      this.retain(
+        `Profile preferences at ${this.file} were not loaded before saving.`,
+      );
+      throw new RosterConfigWriteBlockedError(
+        `Refusing to overwrite profile preferences that were not loaded from ${this.file}.`,
+      );
+    }
+
+    await this.writeConfig(this.file, config);
+    this.configValue = config;
+    this.problemsValue = [];
+    this.hasKnownGood = true;
+    this.blocked = false;
+    this.diskStateKnown = true;
+    this.diskExists = true;
+    this.diskRevision = rosterConfigRevision(config);
+  }
+
+  private retain(problem: string): RosterConfigStoreLoad {
+    this.problemsValue = [problem];
+    this.blocked = true;
+    return {
+      config: this.configValue,
+      problems: this.problemsValue,
+      createdDefault: false,
+      source: this.hasKnownGood ? 'last-known-good' : 'safe-default',
+      writeBlocked: true,
+    };
+  }
 }

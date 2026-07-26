@@ -16,10 +16,23 @@
           <h1>Decagram Council <span class="title-suffix">/ Ops Deck</span></h1>
         </div>
         <div class="topbar-actions">
+          <span id="workspace-label" class="mono-label">No workspace</span>
+          <button id="change-workspace-button" class="button" type="button">Choose workspace</button>
           <span id="connection-state" class="connection-pill">Starting…</span>
           <button id="wake-button" class="button button-accent" hidden>Wake the squad</button>
         </div>
       </header>
+
+      <section id="workspace-setup" class="workspace-setup" hidden>
+        <p class="eyebrow">WORKSPACE SETUP</p>
+        <h2 id="workspace-setup-title">Choose a repository</h2>
+        <p id="workspace-setup-detail" class="lede">
+          Council needs a trusted repository before it can discover or launch agent instructions.
+        </p>
+        <button id="workspace-setup-button" class="button button-primary" type="button">
+          Choose repository
+        </button>
+      </section>
 
       <section id="attention-channel" class="attention-channel" hidden>
         <div>
@@ -96,7 +109,16 @@
             <span id="updated-at" class="muted"></span>
           </div>
           <div class="squad-layout">
-            <div id="squad-grid" class="squad-grid" aria-live="polite"></div>
+            <div>
+              <div id="squad-grid" class="squad-grid" aria-live="polite"></div>
+              <section id="unassigned-panel" class="message-panel">
+                <h3>Unassigned Claude sessions</h3>
+                <p class="muted">
+                  These provider sessions are read-only here because Council has no exact binding for them.
+                </p>
+                <ul id="unassigned-sessions"></ul>
+              </section>
+            </div>
             <aside id="session-detail" class="detail-panel">
               <p class="eyebrow">SESSION DETAIL</p>
               <h3>Select a specialist</h3>
@@ -125,6 +147,11 @@
                 <span id="council-feedback" class="muted" role="status"></span>
               </div>
             </form>
+            <section id="council-session" class="detail-panel council-session">
+              <p class="eyebrow">COUNCIL SESSION</p>
+              <h3>No exact Council binding</h3>
+              <p class="muted">Start a review to create a durable Council conversation.</p>
+            </section>
           </div>
         </section>
 
@@ -149,6 +176,7 @@
         <span>macOS development · Windows production</span>
       </footer>
     </div>
+    <script src="./scene-view-model.js"></script>
     <script src="./pixel-office.js"></script>
     <script src="./renderer.js"></script>
   </body>

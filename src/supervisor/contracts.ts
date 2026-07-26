@@ -32,10 +32,24 @@ export interface AgentSupervisorPort {
   boot(): Promise<BootReport>;
   start(): Promise<void>;
   stop(): Promise<void>;
-  startMember(key: string): Promise<CliResult<StartSessionOutcome>>;
-  stopSession(id: string): Promise<CliResult<string>>;
+  startMember(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+  ): Promise<CliResult<StartSessionOutcome>>;
+  startNewMember(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+  ): Promise<CliResult<StartSessionOutcome>>;
+  resumeMember(profileId: string): Promise<CliResult<string>>;
+  clearBinding(profileId: string): Promise<CliResult<string>>;
+  stopSession(profileId: string): Promise<CliResult<string>>;
   wakeSquad(): Promise<CliResult<string>>;
-  logs(id: string): Promise<CliResult<string>>;
-  reply(id: string, message: string): Promise<CliResult<ReplyOutcome>>;
-  startCouncilReview(question: string, cwd: string): Promise<CliResult<StartSessionOutcome>>;
+  logs(profileId: string): Promise<CliResult<string>>;
+  reply(profileId: string, message: string): Promise<CliResult<ReplyOutcome>>;
+  councilReviewNeedsReplacement(): boolean;
+  startCouncilReview(
+    question: string,
+    expectedDefinitionFingerprint: string,
+    replaceExisting: boolean,
+  ): Promise<CliResult<StartSessionOutcome>>;
 }

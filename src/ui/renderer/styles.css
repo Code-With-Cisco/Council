@@ -206,6 +206,23 @@ h3 {
   display: none;
 }
 
+.workspace-setup {
+  max-width: 720px;
+  margin: 8vh auto;
+  padding: 28px;
+  border: 1px solid rgba(232, 163, 61, 0.45);
+  border-radius: 8px;
+  background: #17150f;
+}
+
+.workspace-setup[hidden] {
+  display: none;
+}
+
+.workspace-setup .lede {
+  line-height: 1.6;
+}
+
 .attention-kicker {
   margin-right: 12px;
   color: var(--amber);
@@ -453,6 +470,13 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.council-session {
+  position: static;
+  min-height: 0;
+  max-height: none;
+  margin-top: 28px;
+}
+
 .project-target {
   margin: 16px 0 0;
   color: #8a94a0;
@@ -518,6 +542,14 @@ label {
 .message-panel {
   margin-top: 14px;
   padding: 18px;
+}
+
+#unassigned-panel {
+  margin-top: 14px;
+}
+
+#unassigned-sessions {
+  overflow-wrap: anywhere;
 }
 
 .message-panel ul {

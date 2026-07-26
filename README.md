@@ -13,12 +13,13 @@ Claude's state files, and renders that authoritative state.
 | Surface | State |
 |---|---|
 | Integration module and parsers | Implemented; platform-neutral tests pass |
+| Trusted workspace, resolved catalog, and exact session bindings | Implemented; Windows verification pending |
 | PowerShell hooks and runtime guards | Implemented; awaiting a real Windows execution |
 | Discovered-agent catalog UI | Implemented |
 | Snapshot-driven pixel office | Initial paged implementation |
 | Council Review pipeline | Implemented |
 | Windows launch preflight and diagnostics | Implemented |
-| x64 NSIS installer configuration | Implemented; packaging awaits final app ID and Windows verification |
+| x64 NSIS installer configuration | Implemented with final app ID; Windows packaging verification pending |
 
 This checkout has not been claimed Windows-verified. The implementation/evidence distinction
 is maintained in [docs/windows-verification.md](docs/windows-verification.md).
@@ -33,9 +34,7 @@ is maintained in [docs/windows-verification.md](docs/windows-verification.md).
 - Optional `node-pty` native module for direct replies; the app degrades to logs-only when
   it is unavailable
 
-The package identifier is intentionally still
-`com.PLACEHOLDER.decagram-council`. Replace it with the final reverse-domain identifier
-before signing or distributing an installer.
+The package identifier is `com.decagram.council`.
 
 ## Application
 
@@ -44,7 +43,9 @@ has context isolation enabled, and has no Node access. A narrow preload bridge e
 IPC operations for:
 
 - reading the live roster;
+- selecting and explicitly trusting a workspace through a privileged folder picker;
 - starting or stopping a specialist;
+- resuming, starting new, or clearing an exact profile binding without deleting provider work;
 - explicitly waking sessions left failed after a machine restart;
 - reading recent logs and sending a plain-text PTY reply;
 - starting a Council Review through the `council-lead` main agent; and
@@ -108,6 +109,12 @@ src/integration/          Electron-free runtime integration
   hooks/                  authenticated localhost receiver and hook generation
   pty/                    attach and headless reply
   gates/                  PowerShell install planning and self-test wrapper
+src/config/
+  appConfig.ts            trusted workspace registry
+src/supervisor/
+  catalog.ts              precedence-aware definition inventory
+  sessionBindings.ts      exact durable profile ownership
+  launchCoordinator.ts    locked, journaled launch transactions
 src/ui/
   main.ts                 Windows-only Electron main process
   preload.cjs             isolated IPC bridge
@@ -118,10 +125,21 @@ scripts/gates/            shipped PowerShell runtime guards
 test/                     parser, guard, council, IPC, and integration tests
 ```
 
+Council is single-instance. Packaged startup never uses its process working
+directory as a repository: first run stays in a recoverable setup screen until
+the user chooses and trusts a folder. The app stores the workspace registry in
+`app-config.json` and exact profile-to-Claude ownership in
+`session-bindings.json`, both under Electron `userData`. The binding document
+also journals an in-flight launch before spawning so an uncertain
+acknowledgement can be reconciled after a crash.
+
 Hooks provide the millisecond fast path, filesystem watches catch state changes, and
 `claude agents --json --all` polling reconciles drift. Hooks schedule a refresh rather than
 mutating UI state, so the CLI remains the source of truth. A failed roster read retains the
 previous roster and marks it stale instead of making the squad disappear.
+Definition/profile watcher failures retain the last-known-good catalog and
+block new definition-based launches while exact already-bound lifecycle
+actions remain available.
 
 ## Development
 
@@ -145,29 +163,35 @@ npm run pack:win
 npm run dist:win
 ```
 
-Before release, replace the placeholder app ID and complete every required probe in
+Before release, complete every required probe in
 [docs/windows-verification.md](docs/windows-verification.md). The original macOS CLI
 transcript in [docs/cli-surface.md](docs/cli-surface.md) is retained only as historical parser
 evidence; it does not qualify the Windows build.
 
 ## Agent discovery and roster preferences
 
-On first run, the application writes an empty `roster.json` preferences file under its user-data
-directory. Effective definitions visible from the selected project's `.claude/agents/` hierarchy
+Opening a trusted workspace does not create or migrate `roster.json`. Existing
+version-1 files remain readable and are normalized only in memory; version 2 is
+written only by an explicit preference save.
+Effective definitions visible from the selected project's `.claude/agents/` hierarchy
 and the user Claude configuration are merged into the live catalog as on-demand profiles. Saved
-members remain label, prompt, model, effort, and ordering overrides. An invalid edit degrades with a
-visible diagnostic rather than crashing.
+members remain label, prompt, model, effort, and ordering overrides. A malformed edit retains the
+last-known-good profiles, blocks overwrite, and surfaces a visible diagnostic.
 
 ```json
 {
-  "version": 1,
-  "members": [
+  "version": 2,
+  "profiles": [
     {
-      "key": "builder-main",
+      "id": "profile-configured123",
+      "workspaceId": "ws_11111111-1111-4111-8111-111111111111",
+      "catalogId": "catalog_…",
+      "agentName": "builder",
       "label": "Builder",
-      "agent": "builder",
-      "cwd": "C:\\work\\meridian",
-      "role": "Implementation"
+      "order": 0,
+      "visible": true,
+      "mode": "normal",
+      "autoStart": false
     }
   ],
   "pollIntervalMs": 10000
@@ -191,6 +215,8 @@ between the requested product behavior and that CLI surface are preserved:
 - The five persistent specialists are background sessions, not one ephemeral Claude team.
 - Background sessions can relocate to `.claude/worktrees/`.
 - Pin state is readable, but the CLI has no pin command.
+- Profile ownership is app-owned and exact: labels, agent names, and cwd are
+  never used to claim a Claude session.
 
 Windows wording, locations, watcher behavior, PTY ABI compatibility, and installer behavior
 must be captured on a Windows host before release.

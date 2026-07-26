@@ -20,7 +20,7 @@ import {
 import { parseRoster } from '../src/integration/parse/roster.js';
 import type { JobsSnapshot } from '../src/integration/fs/jobs.js';
 import type { AgentDefinition } from '../src/integration/fs/agentDefs.js';
-import type { RosterConfig } from '../src/integration/types.js';
+import type { RosterConfig, SessionBindingRef } from '../src/integration/types.js';
 
 const emptyJobs: JobsSnapshot = { states: new Map(), pinned: new Set(), problems: [] };
 
@@ -33,30 +33,56 @@ const config: RosterConfig = {
   pollIntervalMs: 10_000,
 };
 
+function binding(
+  profileId: string,
+  shortSessionId: string,
+  fullSessionId?: string,
+): SessionBindingRef {
+  return {
+    providerId: 'claude-code',
+    workspaceId: 'workspace-test',
+    profileId,
+    shortSessionId,
+    ...(fullSessionId === undefined ? {} : { fullSessionId }),
+    uniqueLaunchName: `dc-${profileId}`,
+    agentName: profileId,
+    catalogId: `catalog-${profileId}`,
+    definitionFingerprint: 'a'.repeat(64),
+    requestedCanonicalCwd: '/work/meridian',
+    createdAt: '2026-07-26T00:00:00.000Z',
+    lastConfirmedAt: '2026-07-26T00:00:00.000Z',
+  };
+}
+
 describe('buildUnifiedRoster', () => {
-  it('links a session to a specialist by name', () => {
+  it('links a session only by its exact persisted short id', () => {
     const roster = buildUnifiedRoster({
       config,
       rosterSessions: parseRoster([
-        { id: 'aaaaaaaa', kind: 'background', name: 'Arden', state: 'working', pid: 1 },
+        { id: 'aaaaaaaa', kind: 'background', name: 'unrelated label', state: 'working', pid: 1 },
       ]),
       jobs: emptyJobs,
       teams: [],
+      bindings: new Map([['arden', binding('arden', 'aaaaaaaa')]]),
     });
 
     expect(roster.squad[0]?.session?.id).toBe('aaaaaaaa');
     expect(roster.squad[0]?.missing).toBe(false);
+    expect(roster.squad[0]?.bindingState).toBe('active');
     expect(roster.squad[1]?.missing).toBe(true);
   });
 
-  it('matches case-insensitively and by key', () => {
+  it('never claims by a matching label or key', () => {
     const roster = buildUnifiedRoster({
       config,
-      rosterSessions: parseRoster([{ id: 'aaaaaaaa', kind: 'background', name: 'bram', pid: 1 }]),
+      rosterSessions: parseRoster([
+        { id: 'aaaaaaaa', kind: 'background', name: 'Arden', cwd: '/work/meridian', pid: 1 },
+      ]),
       jobs: emptyJobs,
       teams: [],
     });
-    expect(roster.squad[1]?.session?.id).toBe('aaaaaaaa');
+    expect(roster.squad.every((slot) => slot.session === undefined)).toBe(true);
+    expect(roster.unassigned.map((session) => session.id)).toEqual(['aaaaaaaa']);
   });
 
   it('never claims an interactive row', () => {
@@ -74,30 +100,46 @@ describe('buildUnifiedRoster', () => {
     expect(roster.unassigned).toHaveLength(0);
   });
 
-  it('prefers the most recently started matching background session', () => {
+  it('uses a full id as the authoritative binding identity', () => {
     const roster = buildUnifiedRoster({
       config,
       rosterSessions: parseRoster([
-        { id: 'old00000', kind: 'background', name: 'Arden', state: 'done', startedAt: 2_000 },
-        { id: 'live0000', kind: 'background', name: 'Arden', state: 'working', pid: 7, startedAt: 1_000 },
+        {
+          id: 'same0000',
+          sessionId: 'same0000-correct',
+          kind: 'background',
+          state: 'working',
+        },
       ]),
       jobs: emptyJobs,
       teams: [],
+      bindings: new Map([
+        ['arden', binding('arden', 'same0000', 'same0000-correct')],
+      ]),
     });
-    expect(roster.squad[0]?.session?.id).toBe('old00000');
+    expect(roster.squad[0]?.session?.sessionId).toBe('same0000-correct');
   });
 
-  it('prefers the most recent when neither has a live process', () => {
+  it('does not fall back to a colliding short id when the full id differs', () => {
     const roster = buildUnifiedRoster({
       config,
       rosterSessions: parseRoster([
-        { id: 'older000', kind: 'background', name: 'Arden', state: 'done', startedAt: 1_000 },
-        { id: 'newer000', kind: 'background', name: 'Arden', state: 'stopped', startedAt: 5_000 },
+        {
+          id: 'same0000',
+          sessionId: 'same0000-other',
+          kind: 'background',
+          state: 'working',
+        },
       ]),
       jobs: emptyJobs,
       teams: [],
+      bindings: new Map([
+        ['arden', binding('arden', 'same0000', 'same0000-correct')],
+      ]),
     });
-    expect(roster.squad[0]?.session?.id).toBe('newer000');
+    expect(roster.squad[0]?.session).toBeUndefined();
+    expect(roster.squad[0]?.staleBinding).toBe(true);
+    expect(roster.unassigned.map((session) => session.sessionId)).toEqual(['same0000-other']);
   });
 
   it('reports unclaimed background sessions instead of hiding them', () => {
@@ -112,23 +154,66 @@ describe('buildUnifiedRoster', () => {
     expect(roster.unassigned.map((s) => s.id)).toEqual(['zzzzzzzz']);
   });
 
-  it('never assigns one unnamed cwd-matched session to multiple agents', () => {
+  it('two profiles with the same label and cwd never claim one another', () => {
     const roster = buildUnifiedRoster({
       config,
       rosterSessions: parseRoster([
-        { id: 'onejob00', kind: 'background', cwd: '/work/meridian', state: 'working' },
+        { id: 'arden000', kind: 'background', name: 'Same', cwd: '/work/meridian', state: 'working' },
+        { id: 'bram0000', kind: 'background', name: 'Same', cwd: '/work/meridian', state: 'working' },
       ]),
       jobs: emptyJobs,
       teams: [],
+      bindings: new Map([
+        ['arden', binding('arden', 'arden000')],
+        ['bram', binding('bram', 'bram0000')],
+      ]),
     });
 
-    expect(roster.squad[0]?.session?.id).toBe('onejob00');
-    expect(roster.squad[1]?.missing).toBe(true);
+    expect(roster.squad.map((slot) => slot.session?.id)).toEqual(['arden000', 'bram0000']);
   });
 
-  it('surfaces a session that has a job file but no roster row', () => {
-    // `agents --json` can drop a session whose process is gone. Keeping it
-    // visible means a specialist card goes dormant rather than disappearing.
+  it('ignores a binding from another workspace even when the profile id collides', () => {
+    const workspaceConfig: RosterConfig = {
+      ...config,
+      members: [{ ...config.members[0]!, workspaceId: 'workspace-active' }],
+    };
+    const foreign = {
+      ...binding('arden', 'foreign1'),
+      workspaceId: 'workspace-foreign',
+    };
+    const roster = buildUnifiedRoster({
+      config: workspaceConfig,
+      rosterSessions: parseRoster([
+        { id: 'foreign1', kind: 'background', state: 'working' },
+      ]),
+      jobs: emptyJobs,
+      teams: [],
+      bindings: new Map([['arden', foreign]]),
+    });
+
+    expect(roster.squad[0]?.binding).toBeUndefined();
+    expect(roster.squad[0]?.bindingState).toBe('none');
+    expect(roster.unassigned.map((session) => session.id)).toEqual(['foreign1']);
+  });
+
+  it('does not call an unverified offline binding stale', () => {
+    const roster = buildUnifiedRoster({
+      config,
+      rosterSessions: [],
+      jobs: emptyJobs,
+      teams: [],
+      bindings: new Map([['arden', binding('arden', 'offline1')]]),
+      rosterAvailable: false,
+    });
+
+    expect(roster.squad[0]?.bindingState).toBe('unavailable');
+    expect(roster.squad[0]?.staleBinding).toBe(false);
+  });
+
+  it('treats a job-file-only exact id as a stale binding and keeps its history unassigned', () => {
+    // `agents --json --all` is the authoritative action surface. A leftover
+    // state file stays visible as read-only evidence but cannot make Resume or
+    // Logs appear usable, and it must not hide the safe Clear-binding action.
     const jobs: JobsSnapshot = {
       states: new Map([
         ['ghost000', { state: 'done', name: 'Arden', detail: 'finished earlier', cwd: '/work/meridian' }],
@@ -136,11 +221,24 @@ describe('buildUnifiedRoster', () => {
       pinned: new Set(),
       problems: [],
     };
-    const roster = buildUnifiedRoster({ config, rosterSessions: [], jobs, teams: [] });
+    const roster = buildUnifiedRoster({
+      config,
+      rosterSessions: [],
+      jobs,
+      teams: [],
+      bindings: new Map([['arden', binding('arden', 'ghost000')]]),
+    });
 
-    expect(roster.squad[0]?.session?.id).toBe('ghost000');
-    expect(roster.squad[0]?.session?.source).toBe('jobfile');
-    expect(roster.squad[0]?.session?.detail).toBe('finished earlier');
+    expect(roster.squad[0]?.session).toBeUndefined();
+    expect(roster.squad[0]?.bindingState).toBe('stale');
+    expect(roster.squad[0]?.staleBinding).toBe(true);
+    expect(roster.unassigned).toEqual([
+      expect.objectContaining({
+        id: 'ghost000',
+        source: 'jobfile',
+        detail: 'finished earlier',
+      }),
+    ]);
   });
 
   it('propagates parse problems for the needs-attention state', () => {
@@ -170,6 +268,7 @@ describe('membersNeedingStart / membersNeedingWake', () => {
       ]),
       jobs: emptyJobs,
       teams: [],
+      bindings: new Map([['arden', binding('arden', 'aaaaaaaa')]]),
     });
 
     expect(membersNeedingStart(roster).map((m) => m.key)).toEqual(['bram']);
@@ -195,7 +294,8 @@ describe('parseRosterConfig', () => {
       fallback,
     );
     expect(loaded.problems.join(' ')).toContain('missing "agent"');
-    expect(loaded.config.members.map((m) => m.key)).toEqual(['bram']);
+    expect(loaded.config.members.map((m) => m.legacyKey)).toEqual(['bram']);
+    expect(loaded.config.members[0]?.key).toMatch(/^profile-v1-/);
   });
 
   it('rejects duplicate keys, which would collide on one identity slot', () => {
@@ -208,7 +308,7 @@ describe('parseRosterConfig', () => {
       },
       fallback,
     );
-    expect(loaded.problems.join(' ')).toContain('duplicate member key');
+    expect(loaded.problems.join(' ')).toContain('duplicate profile id');
     expect(loaded.config.members).toHaveLength(1);
   });
 
@@ -253,7 +353,7 @@ describe('mergeDiscoveredAgents', () => {
 
     expect(merged.config.members.map((member) => member.agent)).toEqual(['builder', 'prd-lead']);
     expect(merged.config.members.map((member) => member.label)).toEqual(['Builder', 'PRD Lead']);
-    expect(merged.config.members[0]?.key).toBe('agent:builder');
+    expect(merged.config.members[0]?.key).toMatch(/^profile-virtual-/);
     expect(merged.config.members[0]?.model).toBe('sonnet');
     expect(merged.discoveredAgents).toEqual(['builder', 'prd-lead']);
   });
