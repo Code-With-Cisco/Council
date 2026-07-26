@@ -29,7 +29,10 @@ credentials.
 | x64 NSIS installer configuration | Implemented with final app ID; Windows packaging verification pending |
 
 This checkout has not been claimed Windows-verified. The implementation/evidence distinction
-is maintained in [docs/windows-verification.md](docs/windows-verification.md).
+is maintained in [docs/windows-verification.md](docs/windows-verification.md), and the
+Milestone 2 outcome — decisions, commands and results, and outstanding Windows evidence — is
+recorded in
+[docs/codex-milestone-02-completion-report.md](docs/codex-milestone-02-completion-report.md).
 
 ## Windows requirements
 

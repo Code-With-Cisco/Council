@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
   MissionCoordinator,
-  MissionDomainError,
   StaleMissionPlanError,
   type MissionGitPort,
   type MissionProviderPort,

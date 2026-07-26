@@ -288,12 +288,12 @@ export class WorktreeLeaseManager {
       .update(this.workspace.id)
       .digest('hex')
       .slice(0, 12);
-    const checkoutPath = path.join(
+    const checkoutParent = await this.ensureOwnedCheckoutParent(
       worktreeRoot,
       workspaceToken,
       leaseToken,
-      'checkout',
     );
+    const checkoutPath = path.join(checkoutParent, 'checkout');
     const branchRef = `refs/heads/council/${workspaceToken}/${leaseToken}`;
     if (await pathExists(checkoutPath)) {
       throw new WorktreeLeaseOperationError(
@@ -816,6 +816,35 @@ export class WorktreeLeaseManager {
   private async ensureWorktreeRoot(): Promise<string> {
     await mkdir(this.configuredWorktreeRoot, { recursive: true });
     return realpath(this.configuredWorktreeRoot);
+  }
+
+  /**
+   * Creates the owned parent of a generated checkout and proves it stays inside
+   * the resolved Council worktree root. `path.join` is lexical, so a symlink or
+   * junction planted at an intermediate segment would otherwise redirect a
+   * Council-owned worktree outside the root before any Git mutation.
+   */
+  private async ensureOwnedCheckoutParent(
+    worktreeRoot: string,
+    workspaceToken: string,
+    leaseToken: string,
+  ): Promise<string> {
+    const expected = path.join(worktreeRoot, workspaceToken, leaseToken);
+    await mkdir(expected, { recursive: true });
+    let resolved: string;
+    try {
+      resolved = await realpath(expected);
+    } catch (error) {
+      throw new WorktreeLeaseOperationError(
+        `Council worktree parent could not be resolved: ${message(error)}`,
+      );
+    }
+    if (this.pathIdentity(resolved) !== this.pathIdentity(expected)) {
+      throw new WorktreeLeaseOperationError(
+        'Generated Council checkout escaped its owned worktree root.',
+      );
+    }
+    return resolved;
   }
 
   private idToken(value: string, prefix: string): string {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { MissionProviderStatus } from '../providers/missionContracts.js';
 import type { GateRunner } from '../missions/gateRunner.js';
 import type {
@@ -102,15 +103,61 @@ function sameStrings(
   );
 }
 
+function gateAttempts(
+  ledger: MissionLedgerFileV1,
+  candidateId: string,
+  kind: 'test' | 'review',
+): readonly MissionGateRecord[] {
+  return Object.values(ledger.gates).filter(
+    (gate) => gate.candidateId === candidateId && gate.kind === kind,
+  );
+}
+
+/**
+ * Deterministic key for one privileged gate attempt. It covers the exact
+ * candidate, policy, and executor, plus the number of attempts already durable
+ * in the ledger. A replayed submit whose outcome was never recorded therefore
+ * returns the existing run instead of starting a second one, while an explicit
+ * re-run after a recorded attempt is a distinct request.
+ */
+function gateIdempotencyKey(input: {
+  readonly workspaceId: string;
+  readonly missionId: string;
+  readonly candidateId: string;
+  readonly kind: 'test' | 'review';
+  readonly commitSha: string;
+  readonly treeSha: string;
+  readonly gatePolicyFingerprint: string;
+  readonly commandIds: readonly string[];
+  readonly executorExecutionId: string;
+  readonly executorProfileId: string;
+  readonly priorAttempts: number;
+}): string {
+  const canonical = {
+    version: 1,
+    workspaceId: input.workspaceId,
+    missionId: input.missionId,
+    candidateId: input.candidateId,
+    kind: input.kind,
+    commitSha: input.commitSha,
+    treeSha: input.treeSha,
+    gatePolicyFingerprint: input.gatePolicyFingerprint,
+    commandIds: [...input.commandIds],
+    executorExecutionId: input.executorExecutionId,
+    executorProfileId: input.executorProfileId,
+    priorAttempts: input.priorAttempts,
+  };
+  return `gate:${createHash('sha256')
+    .update(JSON.stringify(canonical))
+    .digest('hex')}`;
+}
+
 function latestGateAttempt(
   ledger: MissionLedgerFileV1,
   candidateId: string,
   kind: 'test' | 'review',
 ): MissionGateRecord | undefined {
-  return Object.values(ledger.gates)
-    .filter(
-      (gate) => gate.candidateId === candidateId && gate.kind === kind,
-    )
+  return [...gateAttempts(ledger, candidateId, kind)]
     .sort((left, right) => {
       const byTime = right.createdAt.localeCompare(left.createdAt);
       return byTime === 0 ? right.id.localeCompare(left.id) : byTime;
@@ -655,6 +702,23 @@ export class PrivilegedMissionUiController implements MissionUiController {
         input,
       );
       const result = await this.gateRunner.run({
+        idempotencyKey: gateIdempotencyKey({
+          workspaceId: this.workspaceId,
+          missionId: candidate.missionId,
+          candidateId: candidate.id,
+          kind: input.kind,
+          commitSha: candidate.commitSha,
+          treeSha: candidate.treeSha,
+          gatePolicyFingerprint: policy.gatePolicyFingerprint,
+          commandIds: policy.commandIds,
+          executorExecutionId: executor.id,
+          executorProfileId: executor.profileId,
+          priorAttempts: gateAttempts(
+            loaded.data,
+            candidate.id,
+            input.kind,
+          ).length,
+        }),
         workspaceId: this.workspaceId,
         missionId: candidate.missionId,
         candidateId: candidate.id,

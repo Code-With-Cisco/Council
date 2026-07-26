@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { RunMissionGateRequest } from '../src/missions/gateRunner.js';
 import {
   emptyMissionLedgerFile,
   type MissionLedgerStoreState,
@@ -313,7 +314,7 @@ function controllerFixture(data = ledgerFixture()) {
       commandIds: kind === 'test' ? ['typecheck', 'test'] : ['review'],
       gatePolicyFingerprint: POLICY,
     })),
-    run: vi.fn(async () => ({
+    run: vi.fn(async (_request: RunMissionGateRequest) => ({
       candidateId: 'candidate_demo',
       kind: 'test' as const,
       status: 'passed' as const,
@@ -650,6 +651,7 @@ describe('privileged Mission UI controller', () => {
       executorProfileId: 'profile-tester001',
     });
     expect(f.gateRunner.run).toHaveBeenCalledExactlyOnceWith({
+      idempotencyKey: expect.stringMatching(/^gate:[0-9a-f]{64}$/),
       workspaceId: 'workspace_demo',
       missionId: 'mission_demo',
       candidateId: 'candidate_demo',
@@ -675,6 +677,43 @@ describe('privileged Mission UI controller', () => {
     });
     expect(result.executorExecutionId).toBe('execution_tester');
     expect(f.publish).toHaveBeenCalledOnce();
+  });
+
+  it('replays an unrecorded gate attempt and separates an explicit re-run', async () => {
+    const first = controllerFixture();
+    const gateInput = {
+      expectedRevision: 7,
+      candidateId: 'candidate_demo',
+      kind: 'test' as const,
+      commandIds: ['typecheck', 'test'],
+      gatePolicyFingerprint: POLICY,
+      executorProfileId: 'profile-tester001',
+    };
+    await first.controller.recordGate(gateInput);
+    await first.controller.recordGate(gateInput);
+    const [initial, repeat] = first.gateRunner.run.mock.calls.map(
+      ([request]) => request.idempotencyKey,
+    );
+    expect(repeat).toBe(initial);
+
+    const recorded = ledgerFixture();
+    const rerun = controllerFixture({
+      ...recorded,
+      gates: {
+        gate_prior: gateFixture(
+          'gate_prior',
+          'test',
+          'execution_tester',
+          'profile-tester001',
+          { status: 'failed' },
+        ),
+      },
+    });
+    await rerun.controller.recordGate(gateInput);
+    const afterRecordedAttempt =
+      rerun.gateRunner.run.mock.calls[0]?.[0].idempotencyKey;
+    expect(afterRecordedAttempt).toMatch(/^gate:[0-9a-f]{64}$/);
+    expect(afterRecordedAttempt).not.toBe(initial);
   });
 
   it('rejects stale gate policy and producer self-certification before running commands', async () => {

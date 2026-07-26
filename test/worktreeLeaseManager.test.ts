@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -158,6 +159,13 @@ class FakeGit implements GitPort {
   }
 }
 
+function pathExists(target: string): Promise<boolean> {
+  return lstat(target).then(
+    () => true,
+    () => false,
+  );
+}
+
 interface Fixture {
   readonly directory: string;
   readonly store: WorktreeLeaseStore;
@@ -234,6 +242,25 @@ describe('WorktreeLeaseManager', () => {
     expect(lease.lastVerifiedHead).toBe(HEAD);
     expect(lease.lastVerifiedTree).toBe(TREE);
     expect(store.state.data.pendingOperations).toEqual({});
+  });
+
+  it('refuses a worktree root segment redirected by a symlink', async () => {
+    const { directory, git, manager } = await fixture();
+    const workspaceToken = createHash('sha256')
+      .update('ws-fixture')
+      .digest('hex')
+      .slice(0, 12);
+    const worktreeRoot = path.join(directory, 'user-data', 'worktrees');
+    const outside = path.join(directory, 'outside');
+    await mkdir(outside, { recursive: true });
+    await mkdir(worktreeRoot, { recursive: true });
+    await symlink(outside, path.join(worktreeRoot, workspaceToken), 'dir');
+
+    await expect(manager.provisionWriter(request())).rejects.toThrow(
+      /escaped its owned worktree root/,
+    );
+    expect(git.createCalls).toBe(0);
+    expect(await pathExists(path.join(outside, 'checkout'))).toBe(false);
   });
 
   it('serializes duplicate assignment requests into one writer lease', async () => {

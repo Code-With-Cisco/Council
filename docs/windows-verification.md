@@ -14,7 +14,7 @@ This is implementation evidence only:
 
 - `npm run typecheck`: passed
 - `npm run build`: passed
-- `npm test`: passed; 15 PowerShell-dependent tests skipped
+- `npm test`: 43 files, 390 passed, 15 skipped, 0 failed
 - skipped tests: PowerShell execution suites; no PowerShell interpreter is available on this host
 - `npm audit --omit=dev`: 0 vulnerabilities in the packaged runtime dependency set
 - full `npm audit`: 16 high-severity advisories in electron-builder's build-time
