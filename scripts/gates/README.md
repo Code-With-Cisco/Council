@@ -1,178 +1,95 @@
-# Agent write guards
+# Windows agent guards
 
-`PreToolUse` hooks that enforce the write boundaries the agent definitions
-describe. Without these, every boundary in those prompts is advisory — a prompt
-asks an agent not to edit the tests; a guard stops it.
+Decagram Council is a Windows-only application. Every enforcement hook in this
+directory is PowerShell; there is no Bash dialect or macOS registration path.
 
-## How they are wired, and why not the obvious way
+`.claude/settings.json` enables the PowerShell tool, sets PowerShell as the
+default shell, and registers four synchronous handlers:
 
-Registered **once** in `.claude/settings.json`, pointing at
-`agent-write-dispatch.sh`, which routes on the payload's `agent_type` to the
-right guard.
-
-The obvious wiring — a `hooks` block in each agent's frontmatter — **does not
-work**. Verified against Claude Code 2.1.220:
-
-| Attachment point | Result |
-|---|---|
-| Frontmatter `hooks`, agent run via `--agent` | **did not fire** — the blocked write succeeded |
-| Frontmatter `hooks`, agent spawned via the Agent tool | **did not fire** — an always-block probe on `Read` let the read through |
-| `settings.json` hook + dispatcher | **fires correctly** — blocks with the guard's own reason, no file created |
-
-This contradicts the documentation, which states that frontmatter hooks fire
-both when an agent is spawned through the Agent tool and when it runs as the main
-session via `--agent`. Re-test on a Claude Code upgrade; if frontmatter hooks
-start working, the per-agent blocks become the primary path and this dispatcher
-can go away.
-
-The frontmatter `hooks` blocks are still present in the three agent definitions,
-marked inert, as belt-and-braces for that day. **Do not rely on them today.**
-
-Guards and their owners:
-
-| Agent | Guard | Model |
+| Event / matcher | Handler | Purpose |
 |---|---|---|
-| `builder` | `builder-write-guard.sh` | blocklist — deny listed paths, allow the rest |
-| `test-engineer` | `test-engineer-write-guard.sh` | **allowlist** — deny by default |
-| `prd-lead` | `prd-lead-write-guard.sh` | **allowlist** — deny by default |
-| `reviewer` | *none* | has no write tools; `tools` is `Read, Grep, Glob, SendMessage` |
+| `PreToolUse` / `Edit|Write` | `agent-write-dispatch.ps1` | Route guarded agents to their path policy |
+| `PreToolUse` / `PowerShell` | `agent-shell-dispatch.ps1` | Stop guarded agents from using the shell as an editor |
+| `TaskCompleted` | `story-gate.ps1` | Verify traceability, acceptance, and git-visible path ownership |
+| `TeammateIdle` | `story-gate.ps1` | Re-check completed stories before a teammate parks |
 
-`_guard-lib.sh` holds the shared payload parsing, path resolution and pattern
-groups, so a fix lands in all three gates instead of drifting between them.
+Current Claude Code documentation says agent frontmatter hooks run for both
+`--agent` and subagent sessions. A live probe against 2.1.220 previously found
+that they did not fire. The settings-level dispatchers remain the primary
+enforcement path; the direct agent hooks are retained as a second path.
 
-## The dispatcher defaults to ALLOW, deliberately
+## Write policies
 
-A `settings.json` hook fires for **every** `Edit` and `Write` in the project,
-including the ones you make yourself in an ordinary session. So
-`agent-write-dispatch.sh` allows anything whose `agent_type` is not one of the
-three guarded agents — an unrecognised agent, `reviewer`, a `council-*` advisor,
-or a plain human session. Default-deny there would gate your own work.
+`_guard-lib.ps1` parses payloads, normalizes Windows paths, resolves existing
+targets, compares project membership case-insensitively, removes worktree
+prefixes, defines shared path groups, writes the audit log, and collects changed
+paths from git.
 
-Verified live: a main-session write to `test/` is allowed; the same write with
-`agent_type: builder` is blocked.
+The settings-level dispatcher deliberately allows an absent or unknown
+`agent_type`, because a human session uses the same project settings. After a
+guarded agent is identified, malformed payloads, missing targets, outside paths,
+and missing guard scripts fail closed.
 
-The narrower fail-closed rule still applies **inside** each guard: once a
-restricted agent is identified, an unparseable payload or a missing `file_path`
-blocks. And if a guarded agent's guard script is missing or non-executable, the
-dispatcher blocks rather than silently un-gating that agent.
-
-## Contract
-
-Each guard reads the `PreToolUse` hook JSON on stdin and extracts
-`tool_input.file_path` (the field both `Edit` and `Write` use).
-
-| Exit | Meaning |
+| Agent | Policy |
 |---|---|
-| `0` | allow the write |
-| `2` | **block**; stderr is fed back to the agent as the reason |
+| `builder` | May change production files; cannot change PRDs, epics, stories, tests, Claude configuration, guards, agent definitions, or another agent's memory |
+| `test-engineer` | Allowlist: tests, fixtures, acceptance artifacts, stories, and its own memory |
+| `prd-lead` | Allowlist: PRDs, epics, stories, planning artifacts, and its own memory |
+| Other agent / human | Not governed by these role-specific dispatchers |
 
-Anything else would be a non-blocking error notice, so these only ever exit 0
-or 2.
+Protected Claude configuration includes `.claude/settings*.json`,
+`.claude/hooks/**`, `.mcp.json`, `CLAUDE.md`, and `CLAUDE.local.md`.
 
-**They fail closed.** An empty payload, unparseable JSON, a missing
-`file_path`, or a path containing `..` all block. A guard that cannot tell what
-is being written must not wave it through.
+## PowerShell construct guard
 
-**They see through worktrees.** Background sessions relocate into
-`.claude/worktrees/<name>/` before editing, so the same logical file arrives as
-`.claude/worktrees/x/src/foo.ts`. That prefix is stripped before matching —
-otherwise every pattern silently stops matching at exactly the moment an agent
-is doing real work.
+Builder and Test Engineer keep PowerShell because they must run existing build,
+test, and acceptance programs. They may not use PowerShell itself as an editor.
 
-## What each guard blocks
+The shell dispatcher blocks redirection, content-writing cmdlets, file mutation
+cmdlets, `Tee-Object`, direct .NET file writes, dynamic evaluation, encoded
+commands, dynamic script blocks, nested process launch, here-strings, and a
+variable call operator. Commands such as `npm run build`, `npm test`, `node`,
+and `tsc` remain allowed.
 
-### `builder-write-guard.sh`
+This is a construct-level check, not containment. A shell-capable agent can
+write indirectly by creating and running a program. The git check in
+`story-gate.ps1` detects a forbidden changed path at completion regardless of
+which mechanism created it. Neither layer is a security boundary.
 
-Builder implements production code for an approved story. It must not be able to
-move the goalposts.
+## Story acceptance
 
-Blocked: PRD documents (`docs/prd/**`, `docs/prd.md`), epics (`epics/**`,
-`docs/epics/**`), stories (`stories/**`, `docs/stories/**`), any test path
-(`test/**`, `*.test.*`, `*fixtures/*`, `scripts/acceptance/**`),
-`scripts/gates/**`, agent definitions (`.claude/agents/**`,
-`claude-code-agent-pack/**`), and any `.claude/agent-memory/` directory that is
-not `builder`'s own.
+The story `acceptance` field is a Windows PowerShell command. The gate rejects
+obvious POSIX-only syntax (`bash`, `sh`, `./script`, `/bin/...`) and status
+masking. It then executes the command in a fresh non-interactive PowerShell
+process from the project root.
 
-Allowed: everything else, including `src/**` and production config.
+Example:
 
-### `test-engineer-write-guard.sh`
-
-Allowlist. Test Engineer produces the authoritative pass/fail evidence, so it
-must not be able to make a failing test pass by editing the implementation.
-
-Allowed: test paths, fixtures, `scripts/acceptance/**`, story files (so the
-`acceptance` command can be authored), and `.claude/agent-memory/test-engineer/**`.
-
-Blocked: everything else — `src/**`, production config, `migrations/**`,
-`deploy/**`, `.github/workflows/**`, PRD documents, epics, gate scripts, agent
-definitions, other agents' memory.
-
-### `prd-lead-write-guard.sh`
-
-Allowlist. PRD Lead owns product intent and nothing else.
-
-Allowed: PRD documents, PRD change notices (`docs/prd-changes/**`), epics,
-stories, other planning documents (`docs/planning/**`, `docs/decisions/**`,
-`docs/adr/**`, `docs/research/**`, `docs/discovery/**`), and
-`.claude/agent-memory/prd-lead/**`.
-
-Blocked: everything else — all production source and config, all test paths,
-acceptance commands, gate scripts, agent definitions, other agents' memory.
-
-## Limitation: these are path-level gates only
-
-They decide *whether* an agent may write to a file. They cannot see inside it.
-
-Two rules in the agent prompts are therefore **not enforced here and remain
-prompt-level**:
-
-- Test Engineer may edit **only** the `acceptance` field of a story's
-  frontmatter. The guard allows story writes because authoring that command is
-  the agent's job; once allowed, it cannot distinguish an acceptance-field
-  change from a rewritten requirement.
-- PRD Lead must **never** edit the `acceptance` field. Same shape of gap, in
-  the other direction.
-
-Closing both needs a content-level check — for example a `PostToolUse` hook that
-diffs story frontmatter and rejects changes outside the field that agent owns.
-
-## Testing a guard manually
-
-Pipe a hook payload in and read the exit code. `$?` is the whole answer.
-
-```bash
-export CLAUDE_PROJECT_DIR="$(git rev-parse --show-toplevel)"
-
-# Should ALLOW (exit 0) — production source is Builder's job
-printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/src/integration/client.ts"}}' "$CLAUDE_PROJECT_DIR" \
-  | ./scripts/gates/builder-write-guard.sh; echo "exit=$?"
-
-# Should BLOCK (exit 2) — tests belong to Test Engineer
-printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s/test/parse.test.ts"}}' "$CLAUDE_PROJECT_DIR" \
-  | ./scripts/gates/builder-write-guard.sh; echo "exit=$?"
-
-# Should BLOCK (exit 2) — fail closed on an unreadable payload
-echo 'not json' | ./scripts/gates/builder-write-guard.sh; echo "exit=$?"
-
-# Should BLOCK (exit 2) — worktree prefix must not launder the path
-printf '{"tool_input":{"file_path":"%s/.claude/worktrees/ST-142/test/x.test.ts"}}' "$CLAUDE_PROJECT_DIR" \
-  | ./scripts/gates/builder-write-guard.sh; echo "exit=$?"
+```yaml
+---
+id: MER-101
+prd_ref: "docs/prd.md#1.2"
+acceptance: npm test -- upload
+status: done
+---
 ```
 
-The blocking cases print their reason on stderr; that text is what the agent
-receives, so it is written as an instruction to the agent rather than as an
-operator log line.
+## Audit and self-test
 
-## Notes
+Every guarded decision appends one tab-separated line to
+`.claude/gate-audit.log` containing timestamp, event, `agent_type`, target, and
+decision. The file is ignored by git.
 
-- Hook commands use `${CLAUDE_PROJECT_DIR}` rather than a relative path. A
-  relative path resolves against the agent's cwd, which is wrong inside a
-  worktree.
-- These use shell form (`command`, no `args`). If your project path ever
-  contains **spaces**, switch each hook entry to exec form — set
-  `args: []` alongside `command` — so no shell splits the path.
-- `story-gate.sh` / `story-gate.ps1` in this directory are unrelated: they are
-  Muster's `TaskCompleted` / `TeammateIdle` acceptance gates, installed
-  per-project by the app. Builder is blocked from editing all of it.
-- Windows: these are bash. A Windows host needs PowerShell equivalents plus
-  `shell: powershell` on each hook entry.
+`guard-self-test.ps1` sends two known-must-block payloads through the real write
+and shell dispatchers. The launch preflight runs it and surfaces pass, fail, or
+PowerShell-unavailable in diagnostics.
+
+Run manually on Windows:
+
+```powershell
+pwsh -NoProfile -File .\scripts\gates\guard-self-test.ps1 -ProjectDir $PWD
+```
+
+The PowerShell test suites are skipped with an explicit reason when neither
+`pwsh` nor `powershell` exists. A skipped suite is implemented-unverified, not
+a passing Windows claim.

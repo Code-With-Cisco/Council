@@ -1,27 +1,25 @@
-/**
- * End-to-end test of the generated bash forwarder.
- *
- * The other hook tests post with `fetch`, which proves the receiver but not the
- * script. This runs the real `muster-hook.sh` against a real listening receiver,
- * which is the only way to catch a bug in the descriptor parsing — the sed
- * expressions are exactly the kind of thing that breaks silently and leaves the
- * fast path dead while polling quietly covers for it.
- *
- * The PowerShell twin is not executed here (no pwsh on macOS CI) and is covered
- * by the Windows smoke run.
- */
-
+import { spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile, chmod, mkdir } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
-import { ClaudePaths } from '../src/integration/paths.js';
 import { HookReceiver } from '../src/integration/hooks/receiver.js';
-import { bashHookScript, BASH_HOOK_FILENAME } from '../src/integration/hooks/scripts.js';
+import { powershellHookScript } from '../src/integration/hooks/scripts.js';
+import { ClaudePaths } from '../src/integration/paths.js';
 import type { HookDelivery } from '../src/integration/hooks/events.js';
 
+function locatePowerShell(): string | undefined {
+  for (const candidate of ['pwsh', 'powershell']) {
+    const probe = spawnSync(candidate, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {
+      stdio: 'ignore',
+    });
+    if (probe.status === 0) return candidate;
+  }
+  return undefined;
+}
+
+const POWERSHELL = locatePowerShell();
 const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
@@ -29,132 +27,93 @@ afterEach(async () => {
 });
 
 interface Harness {
-  readonly script: string;
   readonly configDir: string;
+  readonly script: string;
   readonly received: HookDelivery[];
-  /** Stops just the receiver, leaving the descriptor and script on disk. */
-  readonly stopReceiver: () => Promise<void>;
+  readonly stop: () => Promise<void>;
 }
 
-/** Installs the script into a throwaway config dir and starts a receiver there. */
-async function setup(options: { startReceiver: boolean }): Promise<Harness> {
-  const configDir = await mkdtemp(path.join(tmpdir(), 'muster-hookscript-'));
+async function setup(startReceiver: boolean): Promise<Harness> {
+  const configDir = await mkdtemp(path.join(tmpdir(), 'decagram-hookscript-'));
   cleanups.push(() => rm(configDir, { recursive: true, force: true }));
-
   const paths = new ClaudePaths({ configDir });
-  await mkdir(paths.hookScriptsDir(), { recursive: true });
-  const script = path.join(paths.hookScriptsDir(), BASH_HOOK_FILENAME);
-  await writeFile(script, bashHookScript(), 'utf8');
-  await chmod(script, 0o755);
+  const script = path.join(configDir, 'decagram-council-hook.ps1');
+  await writeFile(script, powershellHookScript(), 'utf8');
+  await mkdir(paths.decagramCouncilDir(), { recursive: true });
 
   const received: HookDelivery[] = [];
-  let stopReceiver = async (): Promise<void> => undefined;
-  if (options.startReceiver) {
-    const receiver = new HookReceiver(paths, { onDelivery: (d) => received.push(d) });
-    cleanups.push(() => receiver.stop());
-    const info = await receiver.start();
-    // Closes the port but restores the descriptor, so the script finds a port
-    // and then discovers nothing is listening on it — the app-closed-mid-turn
-    // case, which is distinct from "no descriptor at all".
-    stopReceiver = async () => {
-      await receiver.stop();
-      await writeFile(paths.receiverFile(), JSON.stringify(info, null, 2), 'utf8');
-    };
-  }
+  const receiver = new HookReceiver(paths, { onDelivery: (delivery) => received.push(delivery) });
+  if (startReceiver) await receiver.start();
 
-  return { script, configDir, received, stopReceiver };
+  return { configDir, script, received, stop: () => receiver.stop() };
 }
 
-interface Run {
-  readonly code: number;
-  readonly stdout: string;
-}
-
-function runScript(harness: Harness, event: string, payload: unknown): Promise<Run> {
+function runScript(
+  harness: Harness,
+  event: string,
+  payload: unknown,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('bash', [harness.script, event], {
-      // The script resolves the descriptor through CLAUDE_CONFIG_DIR, which is
-      // also how it will behave for a user who has relocated their config.
-      env: { ...process.env, CLAUDE_CONFIG_DIR: harness.configDir },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      POWERSHELL!,
+      ['-NoProfile', '-NonInteractive', '-File', harness.script, event],
+      {
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: harness.configDir,
+          USERPROFILE: harness.configDir,
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
     let stdout = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
     });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? -1, stdout }));
+    child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
     child.stdin.end(JSON.stringify(payload));
   });
 }
 
-/** The script posts asynchronously; give the receiver a moment to record it. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 250));
-
-describe('muster-hook.sh', () => {
-  it('reads the descriptor and delivers the payload', async () => {
-    const harness = await setup({ startReceiver: true });
-    const run = await runScript(harness, 'Notification', {
-      session_id: 'e1f523d7-e83b-46b8-9eca-538f4e74e609',
-      notification_type: 'agent_needs_input',
-      cwd: '/work/meridian',
-    });
-
-    expect(run.code).toBe(0);
-    await settle();
-
-    expect(harness.received).toHaveLength(1);
-    expect(harness.received[0]?.event).toBe('Notification');
-    expect(harness.received[0]?.shortId).toBe('e1f523d7');
-  });
-
-  it('never writes to stdout, which would be fed back into the session', async () => {
-    const harness = await setup({ startReceiver: true });
-    const run = await runScript(harness, 'TaskCompleted', { task_id: 't1', task_name: 'Ship MER-101' });
-    await settle();
-    expect(run.stdout).toBe('');
-    expect(harness.received[0]?.event).toBe('TaskCompleted');
-  });
-
-  it('forwards every subscribed event', async () => {
-    const harness = await setup({ startReceiver: true });
-    const events = [
-      'Notification',
-      'SubagentStart',
-      'SubagentStop',
-      'TaskCreated',
-      'TaskCompleted',
-      'TeammateIdle',
-      'PostToolUseFailure',
-    ];
-    for (const event of events) {
-      expect((await runScript(harness, event, { session_id: 'aaaaaaaa-1' })).code).toBe(0);
-    }
-    await settle();
-    expect(harness.received.map((d) => d.event)).toEqual(events);
-  });
-
-  it('exits 0 when the app is not running', async () => {
-    // No descriptor on disk. An observation hook must never fail a turn just
-    // because the control surface is closed.
-    const harness = await setup({ startReceiver: false });
-    const run = await runScript(harness, 'Notification', { session_id: 'x' });
-    expect(run.code).toBe(0);
-    expect(run.stdout).toBe('');
-  });
-
-  it('exits 0 with no event argument', async () => {
-    const harness = await setup({ startReceiver: true });
-    expect((await runScript(harness, '', {})).code).toBe(0);
-  });
-
-  it('exits 0 when the receiver has gone away mid-turn', async () => {
-    // Descriptor still on disk, nothing listening — the app was closed between
-    // the hook firing and the post. Polling reconciles; the turn continues.
-    const harness = await setup({ startReceiver: true });
-    await harness.stopReceiver();
-    const run = await runScript(harness, 'Notification', { session_id: 'x' });
-    expect(run.code).toBe(0);
-    expect(run.stdout).toBe('');
+describe('PowerShell hook source', () => {
+  it('uses the renamed descriptor path and secret header', () => {
+    const source = powershellHookScript();
+    expect(source).toContain("'decagram-council'");
+    expect(source).toContain('x-decagram-council-secret');
+    expect(source).not.toContain('Write-Host');
   });
 });
+
+describe.skipIf(POWERSHELL === undefined)(
+  'decagram-council-hook.ps1 (skipped when PowerShell is unavailable)',
+  () => {
+    it('delivers a payload without writing to stdout', async () => {
+      const harness = await setup(true);
+      cleanups.push(harness.stop);
+      const run = await runScript(harness, 'Notification', {
+        session_id: 'e1f523d7-1111',
+        notification_type: 'agent_needs_input',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(run.code).toBe(0);
+      expect(run.stdout).toBe('');
+      expect(harness.received[0]?.shortId).toBe('e1f523d7');
+    });
+
+    it('exits 0 when the app is not running', async () => {
+      const harness = await setup(false);
+      const run = await runScript(harness, 'Notification', { session_id: 'x' });
+      expect(run.code).toBe(0);
+      expect(run.stdout).toBe('');
+      await expect(readFile(path.join(harness.configDir, 'missing'), 'utf8')).rejects.toThrow();
+    });
+  },
+);

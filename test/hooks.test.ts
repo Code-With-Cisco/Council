@@ -14,11 +14,12 @@ import { ClaudePaths } from '../src/integration/paths.js';
 import { HookReceiver, SECRET_HEADER } from '../src/integration/hooks/receiver.js';
 import { isNeedsInput, parseHookDelivery } from '../src/integration/hooks/events.js';
 import {
-  MUSTER_HOOK_MARKER,
+  DECAGRAM_COUNCIL_HOOK_MARKER,
   generateHookConfig,
   mergeHookConfig,
   removeHookConfig,
 } from '../src/integration/hooks/generate.js';
+import { GATE_MARKER, generateGateConfig } from '../src/integration/gates/install.js';
 import type { HookDelivery } from '../src/integration/hooks/events.js';
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -28,7 +29,7 @@ afterEach(async () => {
 });
 
 async function tempPaths(): Promise<ClaudePaths> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'muster-test-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'decagram-test-'));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
   return new ClaudePaths({ configDir: dir });
 }
@@ -42,7 +43,7 @@ describe('parseHookDelivery', () => {
     expect(delivery?.shortId).toBe('e1f523d7');
   });
 
-  it('rejects an event Muster did not register', () => {
+  it('rejects an event Decagram Council did not register', () => {
     expect(parseHookDelivery('PreToolUse', { session_id: 'x' })).toBeNull();
   });
 
@@ -119,7 +120,7 @@ describe('HookReceiver', () => {
   });
 
   it('takes the event from the path, not the body', async () => {
-    // Otherwise any local process could claim to be an event Muster never
+    // Otherwise any local process could claim to be an event Decagram Council never
     // registered a hook for.
     const paths = await tempPaths();
     const received: HookDelivery[] = [];
@@ -162,7 +163,7 @@ describe('HookReceiver', () => {
 describe('hook config generation', () => {
   it('emits async command hooks for every subscribed event', async () => {
     const paths = await tempPaths();
-    const config = generateHookConfig(paths, { windows: false });
+    const config = generateHookConfig(paths);
 
     expect(Object.keys(config).sort()).toEqual([
       'Notification',
@@ -177,16 +178,15 @@ describe('hook config generation', () => {
     const handler = config['Notification']?.[0]?.hooks[0];
     // async: these observe only. Blocking would add a round trip to every turn.
     expect(handler?.async).toBe(true);
-    expect(handler?.args).toEqual(['Notification']);
-    expect(handler?.command).toContain('muster-hook.sh');
+    expect(handler?.shell).toBe('powershell');
+    expect(handler?.command).toContain('decagram-council-hook.ps1');
     expect(config['Notification']?.[0]?.matcher).toContain('agent_needs_input');
   });
 
-  it('uses the PowerShell dialect on Windows', async () => {
+  it('quotes the PowerShell script path for Windows profiles containing spaces', async () => {
     const paths = await tempPaths();
-    const handler = generateHookConfig(paths, { windows: true })['Notification']?.[0]?.hooks[0];
-    expect(handler?.shell).toBe('powershell');
-    expect(handler?.command).toContain('muster-hook.ps1');
+    const handler = generateHookConfig(paths)['Notification']?.[0]?.hooks[0];
+    expect(handler?.command).toMatch(/^& '.+decagram-council-hook\.ps1' 'Notification'$/);
   });
 });
 
@@ -199,46 +199,72 @@ describe('mergeHookConfig', () => {
       },
     };
 
-    const merged = mergeHookConfig(existing, generateHookConfig(paths, { windows: false }));
+    const merged = mergeHookConfig(existing, generateHookConfig(paths));
     const groups = (merged['hooks'] as Record<string, unknown[]>)['Notification'] ?? [];
 
     expect(JSON.stringify(groups)).toContain('/my/own.sh');
-    expect(JSON.stringify(groups)).toContain('muster-hook.sh');
+    expect(JSON.stringify(groups)).toContain('decagram-council-hook.ps1');
   });
 
   it('is idempotent, so re-running never accumulates duplicates', async () => {
     const paths = await tempPaths();
-    const generated = generateHookConfig(paths, { windows: false });
+    const generated = generateHookConfig(paths);
     const once = mergeHookConfig({}, generated);
     const twice = mergeHookConfig(once, generated);
     expect(JSON.stringify(twice)).toBe(JSON.stringify(once));
   });
 
-  it('replaces a stale Muster handler rather than leaving both', async () => {
+  it('replaces a stale Decagram Council handler rather than leaving both', async () => {
     const paths = await tempPaths();
     const stale = {
       hooks: {
         Notification: [
-          { hooks: [{ type: 'command', command: '/old/path/muster-hook.sh', statusMessage: MUSTER_HOOK_MARKER }] },
+          { hooks: [{ type: 'command', command: '/old/path/decagram-council-hook.sh', statusMessage: DECAGRAM_COUNCIL_HOOK_MARKER }] },
         ],
       },
     };
-    const merged = mergeHookConfig(stale, generateHookConfig(paths, { windows: false }));
+    const merged = mergeHookConfig(stale, generateHookConfig(paths));
     const text = JSON.stringify(merged);
-    expect(text).not.toContain('/old/path/muster-hook.sh');
-    expect(text).toContain('muster-hook.sh');
+    expect(text).not.toContain('/old/path/decagram-council-hook.sh');
+    expect(text).toContain('decagram-council-hook.ps1');
   });
 
-  it('removes only Muster entries on uninstall', async () => {
+  it('migrates the old story-gate marker to exactly one new handler', async () => {
+    const stale = {
+      hooks: {
+        TaskCompleted: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: '/old/path/story-gate.sh',
+                statusMessage: 'muster-story-gate',
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const merged = mergeHookConfig(stale, generateGateConfig());
+    const handlers = (
+      ((merged['hooks'] as Record<string, { hooks: unknown[] }[]>)['TaskCompleted'] ?? [])
+    ).flatMap((group) => group.hooks) as { statusMessage?: string }[];
+
+    expect(handlers).toHaveLength(1);
+    expect(handlers[0]?.statusMessage).toBe(GATE_MARKER);
+  });
+
+  it('removes only Decagram Council entries on uninstall', async () => {
     const paths = await tempPaths();
     const merged = mergeHookConfig(
       { hooks: { Notification: [{ hooks: [{ type: 'command', command: '/my/own.sh' }] }] } },
-      generateHookConfig(paths, { windows: false }),
+      generateHookConfig(paths),
     );
 
     const cleaned = removeHookConfig(merged);
     const text = JSON.stringify(cleaned);
     expect(text).toContain('/my/own.sh');
-    expect(text).not.toContain('muster-hook');
+    expect(text).not.toContain('decagram-council-hook');
   });
 });

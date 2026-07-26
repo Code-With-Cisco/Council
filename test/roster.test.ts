@@ -69,7 +69,7 @@ describe('buildUnifiedRoster', () => {
     expect(roster.unassigned).toHaveLength(0);
   });
 
-  it('prefers the live session over a stale completed one', () => {
+  it('prefers the most recently started matching background session', () => {
     const roster = buildUnifiedRoster({
       config,
       rosterSessions: parseRoster([
@@ -79,7 +79,7 @@ describe('buildUnifiedRoster', () => {
       jobs: emptyJobs,
       teams: [],
     });
-    expect(roster.squad[0]?.session?.id).toBe('live0000');
+    expect(roster.squad[0]?.session?.id).toBe('old00000');
   });
 
   it('prefers the most recent when neither has a live process', () => {

@@ -1,232 +1,148 @@
-# Muster
+# Decagram Council
 
-A cross-platform desktop control surface (macOS + Windows, Electron) for Claude Code's
-existing multi-agent runtime. The repo is `Council`; the app is **Muster**, per the design
-handoff.
+Decagram Council is a **Windows-only Electron desktop application** for observing and
+controlling Claude Code's existing multi-agent runtime. It targets 64-bit Windows 10 and
+Windows 11 and packages as an assisted NSIS installer.
 
-**Muster is not an agent runtime.** Claude Code's per-user supervisor daemon already hosts
-background sessions that persist across sleep and terminal closes. Muster shells out to the
-`claude` CLI and reads state files. That is the whole integration — no Agent SDK, no model
-calls of its own, nothing the supervisor already does reimplemented.
+The application is not an agent runtime. Claude Code's supervisor owns background sessions,
+persistence, worktrees, and scheduling. Decagram Council calls the `claude.exe` CLI, reads
+Claude's state files, and renders that authoritative state.
 
-## Status
+## Current status
 
-| Phase | State |
+| Surface | State |
 |---|---|
-| 1. Integration module + test harness | **Done** — 97 tests, round-trip verified against a real local CLI |
-| 2. Hook receiver + generated hook config | **Done** — bash forwarder verified end-to-end |
-| 3. Minimal UI wired end-to-end | Not started |
-| 4. Design-spec UI (`Muster — Ops Deck`) | Not started |
-| 5. Tray, notifications, packaging | Not started |
+| Integration module and parsers | Implemented; platform-neutral tests pass |
+| PowerShell hooks and runtime guards | Implemented; awaiting a real Windows execution |
+| Five-specialist squad UI | Implemented |
+| Council Review pipeline | Implemented |
+| Windows launch preflight and diagnostics | Implemented |
+| x64 NSIS installer configuration | Implemented; packaging awaits final app ID and Windows verification |
 
-Per the build order, work stops here for review before any UI code.
+This checkout has not been claimed Windows-verified. The implementation/evidence distinction
+is maintained in [docs/windows-verification.md](docs/windows-verification.md).
 
-## Compatibility
+## Windows requirements
 
-**Requires Claude Code >= 2.1.220.**
+- 64-bit Windows 10 or Windows 11
+- Claude Code 2.1.220 or newer
+- PowerShell
+- Git for Windows
+- Node.js 20.11 or newer for development
+- Optional `node-pty` native module for direct replies; the app degrades to logs-only when
+  it is unavailable
 
-Agent view is a research preview and its CLI surface changes between versions. Every command,
-flag, JSON field and on-disk path this app depends on was verified by probing the installed
-binary at **2.1.220** — not from documentation alone. Earlier versions are untested rather
-than known-broken; `claude --version` is read at launch and a lower version is surfaced in
-the diagnostics panel.
+The package identifier is intentionally still
+`com.PLACEHOLDER.decagram-council`. Replace it with the final reverse-domain identifier
+before signing or distributing an installer.
 
-Verified surface:
+## Application
 
-```
-claude agents --json [--all] [--cwd <path>]     roster read
-claude --bg [--agent <n>] [--name <l>] "<p>"    dispatch a session
-claude --bg --name <l> --exec '<cmd>'           dispatch a shell job (no model quota)
-claude logs|stop|kill|respawn|rm <id>           session control
-claude respawn --all                            "wake the squad"
-claude attach <id>                              PTY attach
-claude daemon status                            supervisor state
-claude daemon stop --any --keep-workers         recovery
-```
+The Electron main process owns every CLI call and filesystem read. The renderer is sandboxed,
+has context isolation enabled, and has no Node access. A narrow preload bridge exposes typed
+IPC operations for:
 
-`logs`, `stop`, `kill`, `respawn`, `rm`, `attach` and `daemon` are **hidden** subcommands —
-present and working, but absent from `claude --help`. They are documented in the official CLI
-reference.
+- reading the live roster;
+- starting or stopping a specialist;
+- explicitly waking sessions left failed after a machine restart;
+- reading recent logs and sending a plain-text PTY reply;
+- starting a Council Review through the `council-lead` main agent; and
+- reading Windows launch diagnostics.
 
-On-disk state read (read-only, `CLAUDE_CONFIG_DIR` honoured):
+The UI shows one card per configured specialist with identity, role, state, hot/cold status,
+and pin state. Human-blocked sessions share one amber attention channel; when several need
+attention, the first is shown with a count instead of creating competing alert surfaces.
 
-```
-<config>/jobs/<id>/state.json     per-session state, richer than the roster
-<config>/jobs/pins.json           pinned session ids
-<config>/daemon/roster.json       supervisor's own session list
-<config>/agents/**.md             subagent definitions (for --agent validation)
-<config>/teams/<team>/config.json ephemeral team membership
-<config>/tasks/<team>/            shared task list
-```
+The diagnostics view does not guess. Missing dependencies remain visible, a stopped Claude
+daemon is shown as a normal resting state, and unrecognized daemon prose is shown as
+**Unknown** with the raw text retained.
 
-Muster writes to exactly one place under the Claude config directory: `<config>/muster/`
-(its own hook scripts and the receiver descriptor). Settings edits happen only through an
-explicit, previewed, user-approved flow.
+## Council Review
 
-## Spec vs. shipped runtime
+Council Review is an executable multi-agent pipeline, not a single-context role-play:
 
-Seven places where the original app spec did not match Claude Code 2.1.220. The docs and the
-installed binary win; each is handled as described.
+1. `council-lead` freezes one evidence packet.
+2. Five read-only advisors analyze it independently.
+3. Their findings are shuffled as Responses A–E.
+4. Advisors perform a structured peer review.
+5. The read-only chairman returns the final verdict.
 
-### 1. There is no `claude reply` command
+The app starts the lead with `claude.exe --bg --agent council-lead ...`; arguments are passed
+as an array without shell interpolation. The lead definition carries the exact advisor
+allowlist.
 
-The spec's lightweight "logs + reply" path assumed one. The complete set of session
-subcommands is `attach / logs / stop / kill / respawn / rm / daemon`. Worse than absent —
-`claude reply <id> "text"` falls through to the default command and would start a **new
-interactive session whose first prompt is the literal word "reply"**.
+## Runtime guards
 
-**Handled:** both talking paths go through the PTY. `AttachSession` drives the xterm.js
-drawer; `sendReply` is the same mechanism run headlessly and torn down (attach → wait for
-output to quiesce → type → Ctrl+Z). Attaching a stopped session restarts it from its saved
-transcript, so replying to a cold specialist wakes it — the behaviour the spec wanted,
-reached a different way.
+`scripts/gates/` contains one Windows PowerShell implementation. There is no Bash gate path.
 
-### 2. The CLI exits 0 on failure
+- `agent-write-dispatch.ps1` routes `Edit|Write` events by `agent_type`.
+- `agent-shell-dispatch.ps1` evaluates PowerShell operations for guarded agents.
+- The builder, test engineer, and PRD lead receive role-specific write restrictions.
+- `story-gate.ps1` enforces PRD traceability and runs acceptance commands in a fresh,
+  non-interactive PowerShell process.
+- `guard-self-test.ps1` exercises the installed guard set during launch preflight.
 
-```
-$ claude logs zzzzzzzz
-No job matching 'zzzzzzzz'. Run 'claude agents' to list running sessions.
-$ echo $?
-0
-```
-
-**Handled:** `src/integration/cli/errors.ts` classifies failures from output text. Exit codes
-are only trusted when non-zero. Every call returns a discriminated
-`{ok:true,value} | {ok:false,kind,message,raw}` so CLI errors render as states.
-
-### 3. `claude daemon status` is prose, and "not running" is normal
-
-No `--json`. And service install is disabled in this version — the supervisor starts on
-demand and exits when the last client disconnects, so a stopped daemon is the resting state.
-
-**Handled:** a text parser with both real shapes as fixtures. The UI must never present a
-stopped daemon as a fault.
-
-### 4. `--agent <unknown>` does not fail
-
-```
-$ claude --bg --agent __no_such_agent__ --name probe "say hi"
-warning: no agent named '__no_such_agent__' — spawning with default template
-backgrounded · 4f544317 · probe
-```
-
-A roster typo would produce a live session running a generic agent under a specialist's
-name — a failure that looks like success.
-
-**Handled:** roster `agent` names are validated against `.claude/agents/` and
-`~/.claude/agents/` before dispatch, and `startMember` refuses when the definition is
-missing. The warning is also detected post-hoc as a backstop.
-
-### 5. Agent teams are not the squad
-
-The spec modelled the five specialists as a persistent team. Teams are experimental
-(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), there is exactly **one team per session**, the
-name is auto-derived (`session-` + first 8 chars of the session id), and
-`<config>/teams/<team>/` is **deleted when the lead session ends**. The docs explicitly warn
-against pre-authoring or hand-editing it.
-
-**Handled:** the squad is five background sessions dispatched with `--agent`. Team state is
-read-only observation of whatever huddles happen to exist. Teammates genuinely do not appear
-in `agents --json`, so the unified roster still merges this source.
-
-### 6. Background sessions relocate into git worktrees
-
-Not mentioned in the spec. Sessions move into `.claude/worktrees/` before editing files, so
-the in-flight version of a story often lives in a worktree rather than the main checkout —
-the work board would appear to lose edits.
-
-**Handled:** `worktreeBoards()` enumerates them so the UI can show which copy it is reading.
-A project can opt out with `{"worktree": {"bgIsolation": "none"}}`.
-
-### 7. There is no pin command — but pin state is readable
-
-Confirmed: pinning is `Ctrl+T` inside the agent-view TUI only. The spec asked us to check.
-
-**Handled:** cold is treated as a normal state, and `<config>/jobs/pins.json` is read so the
-UI can still show which sessions are pinned. Pinned sessions are exempt from the ~1h idle
-stop and are never rendered dormant.
-
-### Also worth knowing
-
-- **`pid` is not a liveness signal.** The docs describe it as present while the process is
-  alive, but a background session in state `working` reports no `pid` at all — the supervisor
-  hosts the process. Cold is derived from `state`, and defaults to *not* cold when unknown.
-- **Short id == first 8 chars of the session UUID**, confirmed against `state.json`'s
-  `daemonShort`. This is how hook payloads (which carry `session_id`) correlate with roster
-  rows (keyed by short id).
-- **`http`-type hooks exist** (gated by the `allowedHttpHookUrls` setting), but the receiver
-  binds an ephemeral port, and an HTTP hook needs a literal URL in settings. Script
-  forwarders read the port at fire time, so settings are written once.
+The guards are registered in `.claude/settings.json` with PowerShell as the default shell.
+They are defense in depth for supported Claude tool events, not an operating-system sandbox.
+See [scripts/gates/README.md](scripts/gates/README.md) for the exact boundary.
 
 ## Architecture
 
+```text
+src/integration/          Electron-free runtime integration
+  client.ts               argv-array Claude CLI client
+  runtime.ts              poll + watch + hooks -> one Snapshot
+  preflight.ts            Windows launch diagnostics
+  cli/                    claude.exe discovery, execution, error classification
+  parse/                  roster and daemon parsers
+  fs/                     jobs, teams, definitions, and watchers
+  roster/                 editable squad config and unified roster
+  hooks/                  authenticated localhost receiver and hook generation
+  pty/                    attach and headless reply
+  gates/                  PowerShell install planning and self-test wrapper
+src/ui/
+  main.ts                 Windows-only Electron main process
+  preload.cjs             isolated IPC bridge
+  renderer/               static HTML, CSS, and JavaScript UI
+scripts/gates/            shipped PowerShell runtime guards
+.claude/agents/           specialist and council agent definitions
+.claude/skills/           Council Review router
+test/                     parser, guard, council, IPC, and integration tests
 ```
-src/integration/         Electron-free, importable from plain Node
-  types.ts               domain types — the reviewable API surface
-  paths.ts               every filesystem location; nothing joins paths by hand
-  client.ts              ClaudeClient — all session control
-  runtime.ts             MusterRuntime — poll + watch + hooks -> one Snapshot
-  cli/                   locate, exec, error classification
-  parse/                 roster JSON, daemon status text, dispatch acks
-  fs/                    jobs, teams, agent definitions, chokidar watching
-  roster/                user-editable config + the unified roster merge
-  hooks/                 receiver, typed events, config generator, scripts
-  pty/                   attach + headless reply
-  board/                 PRD / epics / stories reader
-  gates/                 per-project gate installer
-  harness/cli.ts         the integration test harness
-scripts/gates/           story-gate.sh + story-gate.ps1 (shipped, installed per-project)
-test/                    97 tests; fixtures recorded from a real CLI
-```
 
-**Data flow.** Hooks are the fast path (milliseconds), filesystem watches are the second fast
-path, and `agents --json --all` polling every ~10s is reconciliation. Hooks are never the only
-path: a hook delivery schedules a refresh rather than mutating state, so the CLI stays the
-single source of truth and there is no divergent in-app model. A failed roster read keeps the
-previous roster and marks it stale rather than blanking the squad screen.
+Hooks provide the millisecond fast path, filesystem watches catch state changes, and
+`claude agents --json --all` polling reconciles drift. Hooks schedule a refresh rather than
+mutating UI state, so the CLI remains the source of truth. A failed roster read retains the
+previous roster and marks it stale instead of making the squad disappear.
 
-**Finding the CLI.** A desktop app is not launched from the user's login shell, so PATH is
-often missing what a terminal would have. `locateClaude` probes an override, then PATH, then
-well-known install directories, then the VS Code extension's bundled binary — which on this
-machine is the only copy present.
+## Development on Windows
 
-## Running it
+Run these commands from PowerShell:
 
-```bash
+```powershell
 npm install
 npm run typecheck
-npm test                     # 97 tests, no CLI required (fixtures + real bash scripts)
-
-npm run harness doctor       # locate the CLI, read version + daemon status
-npm run harness roster       # the unified roster
-npm run harness agents       # subagent definitions visible from here
-npm run harness roundtrip    # dispatch -> roster -> logs -> stop -> rm
-npm run harness hooks        # start the receiver, print a test curl
-npm run harness board <dir>  # read a project's work board
-npm run harness watch        # print state changes as they arrive
+npm test
+npm start
 ```
 
-`roundtrip` uses `--bg --exec` by default: a supervisor-hosted shell job that exercises the
-identical dispatch, roster, logs, stop and rm paths **without spending model quota**. Pass
-`--agent <name>` for a model-backed session when that specifically matters.
+Build an unpacked Windows directory or an NSIS installer:
 
-Verified output on this machine (Claude Code 2.1.220, macOS):
-
-```
-✓ dispatch (--exec) (1600ms)
-✓ dispatched 8972dd25
-✓ roster shows 8972dd25: state=working cold=false name=muster-harness-ms13d1uu
-✓ state.json: state=working detail="starting…"
-✓ short id is the first 8 characters of the session id
-✓ bogus id classified as unknown-session despite exit code 0
-✓ stop 8972dd25 (821ms)  ✓ removed 8972dd25
-✓ round-trip complete; no sessions left behind
+```powershell
+npm run pack:win
+npm run dist:win
 ```
 
-## Roster config
+Before release, replace the placeholder app ID and complete every required probe in
+[docs/windows-verification.md](docs/windows-verification.md). The original macOS CLI
+transcript in [docs/cli-surface.md](docs/cli-surface.md) is retained only as historical parser
+evidence; it does not qualify the Windows build.
 
-The five specialists are declared in a user-editable JSON file owned by the app (not under
-`~/.claude`). Identity keys are fixed by the design spec — colour and sigil key off `key`.
+## Roster configuration
+
+On first run, the application writes `roster.json` under its Windows user-data directory.
+Each `agent` must match a subagent definition in the project or user Claude configuration.
+An invalid edit degrades to defaults with a visible diagnostic rather than crashing.
 
 ```json
 {
@@ -236,7 +152,7 @@ The five specialists are declared in a user-editable JSON file owned by the app 
       "key": "arden",
       "label": "Arden",
       "agent": "arden",
-      "cwd": "/Users/me/work/meridian",
+      "cwd": "C:\\work\\meridian",
       "role": "Architecture"
     }
   ],
@@ -244,38 +160,21 @@ The five specialists are declared in a user-editable JSON file owned by the app 
 }
 ```
 
-`agent` must match the `name` frontmatter of a subagent definition under
-`<project>/.claude/agents/` or `~/.claude/agents/`. A bad edit degrades to defaults with a
-visible explanation rather than crashing the app you need in order to fix it.
+The fixed default identities are Arden, Bram, Rook, Tess, and Sage.
 
-## Story gates
+## Verified integration assumptions
 
-`scripts/gates/` ships paired bash + PowerShell gate scripts, installed into a project's
-`.claude/hooks/` by an app action and wired to `TaskCompleted` and `TeammateIdle`. They block
-completion (exit 2) when a story's `prd_ref` is missing or its `acceptance` command exits
-nonzero. Unlike the notification forwarders these are deliberately **synchronous** — `async`
-would make exit code 2 meaningless.
+The implementation was originally probed against Claude Code 2.1.220. Important mismatches
+between the requested product behavior and that CLI surface are preserved:
 
-Story frontmatter:
+- There is no `claude reply`; direct replies use `claude attach <id>` through a PTY.
+- Some CLI failures exit zero, so anchored output envelopes are classified instead.
+- `claude daemon status` is prose and a stopped transient daemon is normal.
+- An unknown `--agent` warns and starts a default agent, so definitions are validated before
+  dispatch.
+- The five persistent specialists are background sessions, not one ephemeral Claude team.
+- Background sessions can relocate to `.claude/worktrees/`.
+- Pin state is readable, but the CLI has no pin command.
 
-```yaml
----
-id: MER-101
-title: Parse uploads
-epic: epic-1
-prd_ref: "§1.2"                  # required — traceability to docs/prd.md
-acceptance: npm test -- upload   # required — must exit 0
-status: done
-gate: pass
----
-```
-
-## Engineering baseline
-
-TypeScript strict everywhere (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
-The integration module has no Electron dependency, so it is testable from plain Node. Every
-CLI interaction is mocked for tests via fixtures recorded from a real `--json` run. Errors
-from the CLI are states to render, not exceptions to swallow.
-
-For the Electron phases: main process owns all CLI and file access; renderer sandboxed with
-`contextIsolation` on and `nodeIntegration` off; typed IPC only.
+Windows wording, locations, watcher behavior, PTY ABI compatibility, and installer behavior
+must be captured on a Windows host before release.

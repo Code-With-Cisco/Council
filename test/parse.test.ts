@@ -129,6 +129,7 @@ describe('parseStartedSession', () => {
 describe('parseDaemonStatus', () => {
   it('reads a running daemon', () => {
     const status = parseDaemonStatus(readFixture('daemon-status-running.txt'));
+    expect(status.recognized).toBe(true);
     expect(status.running).toBe(true);
     expect(status.pid).toBe(9806);
     expect(status.version).toBe('2.1.220');
@@ -142,6 +143,7 @@ describe('parseDaemonStatus', () => {
     // Service install is disabled in v2.1.220: the supervisor starts on demand
     // and exits when the last client disconnects, so this is the resting state.
     const status = parseDaemonStatus(readFixture('daemon-status-stopped.txt'));
+    expect(status.recognized).toBe(true);
     expect(status.running).toBe(false);
     expect(status.pid).toBeUndefined();
     expect(status.controlSocketReachable).toBe(false);
@@ -151,6 +153,7 @@ describe('parseDaemonStatus', () => {
 
   it('retains raw output for an unrecognised format', () => {
     const status = parseDaemonStatus('something entirely new');
+    expect(status.recognized).toBe(false);
     expect(status.running).toBe(false);
     expect(status.raw).toBe('something entirely new');
   });

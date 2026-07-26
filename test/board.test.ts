@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 async function scaffoldProject(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), 'muster-board-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'decagram-board-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
 
   await mkdir(path.join(root, 'docs'), { recursive: true });
@@ -98,7 +98,7 @@ describe('readBoard', () => {
   });
 
   it('returns an empty board for a project with no pipeline files', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'muster-empty-'));
+    const root = await mkdtemp(path.join(tmpdir(), 'decagram-empty-'));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const board = await readBoard(root);
     expect(board.epics).toEqual([]);
@@ -147,6 +147,6 @@ describe('claudeConfigDir', () => {
       path.join('/custom/claude', 'teams', 'session-abc12345', 'config.json'),
     );
     // The app's own writable subtree — the only place it writes under <config>.
-    expect(paths.receiverFile()).toBe(path.join('/custom/claude', 'muster', 'receiver.json'));
+    expect(paths.receiverFile()).toBe(path.join('/custom/claude', 'decagram-council', 'receiver.json'));
   });
 });

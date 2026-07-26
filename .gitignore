@@ -6,3 +6,5 @@ release/
 .DS_Store
 .vite/
 coverage/
+.claude/settings.local.json
+.claude/gate-audit.log

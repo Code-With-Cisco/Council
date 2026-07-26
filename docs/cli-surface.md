@@ -1,5 +1,10 @@
 # Claude Code CLI probe transcript
 
+> **Archived platform evidence.** This transcript was captured on macOS before the product
+> became Windows-only. It remains useful as a parser regression record, but it is not a
+> supported-platform verification. Windows release evidence belongs in
+> `docs/windows-verification.md`.
+
 Verbatim record of what the installed CLI actually does, captured on
 **2026-07-25** against **Claude Code 2.1.220** (macOS, darwin-x64). Source of truth for the
 parsers in `src/integration/parse/` and the fixtures in `test/fixtures/`.
@@ -247,7 +252,7 @@ config root at bounded depth rather than watching those paths directly.
 ## Hook events confirmed in the shipped schema
 
 Read from `claude-code-settings.schema.json` inside the installed extension — authoritative
-for this version, not just the docs. All seven events Muster subscribes to are present:
+for this version, not just the docs. All seven events Decagram Council subscribes to are present:
 
 ```
 Notification, SubagentStart, SubagentStop, TaskCreated, TaskCompleted,

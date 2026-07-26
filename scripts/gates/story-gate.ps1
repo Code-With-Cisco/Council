@@ -1,46 +1,41 @@
 #Requires -Version 5.1
 <#
-Muster story gate - PowerShell dialect (Windows).
+Decagram Council story gate for Windows.
 
-Behavioural twin of story-gate.sh. Installed per-project by Muster into
-<project>\.claude\hooks\ and wired to the TaskCompleted and TeammateIdle events
-with "shell": "powershell".
+The hook is synchronous. Exit 0 allows completion; exit 2 blocks and sends the
+stderr reason back to Claude Code.
 
-Blocks completion when a story is not actually done:
-  * frontmatter has no `prd_ref` (no traceability to the PRD), or
-  * the `acceptance` command exits nonzero.
-
-Exit code contract (from the hooks reference):
-  0  no opinion, carry on
-  2  BLOCK; stderr is fed back to Claude as the reason
-Any other code is a non-blocking notice, which is why internal failures below
-exit 0 rather than surfacing: a broken gate must not wedge the squad.
-
-Usage: story-gate.ps1 <TaskCompleted|TeammateIdle>   (payload on stdin)
+The gate validates PRD traceability, runs the story's PowerShell acceptance
+command, and checks the git worktree for paths the completing agent was not
+allowed to modify. Git-based detection complements the construct-level shell
+guard; neither layer is an operating-system security boundary.
 #>
 
-param([Parameter(Position = 0)][string]$Event)
+param(
+    [Parameter(Position = 0)][string]$Event,
+    [string]$PayloadText
+)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_guard-lib.ps1')
 
 if ([string]::IsNullOrWhiteSpace($Event)) { exit 0 }
 
-$payloadText = [Console]::In.ReadToEnd()
-$payload = $null
-if (-not [string]::IsNullOrWhiteSpace($payloadText)) {
-    try { $payload = $payloadText | ConvertFrom-Json } catch { $payload = $null }
+try {
+    $payload = Get-GuardPayload -PayloadText $PayloadText
+} catch {
+    [Console]::Error.WriteLine("Story gate received an unparseable payload. Blocked (fail closed).")
+    exit 2
 }
 
-$projectDir = $env:CLAUDE_PROJECT_DIR
-if ([string]::IsNullOrWhiteSpace($projectDir)) { $projectDir = $payload.cwd }
-if ([string]::IsNullOrWhiteSpace($projectDir)) { $projectDir = (Get-Location).Path }
-
+$projectDir = Get-GuardProjectDir $payload
 $storiesDir = Join-Path $projectDir 'stories'
-if (-not (Test-Path -LiteralPath $storiesDir)) { exit 0 }  # Not a pipeline project.
+if (-not (Test-Path -LiteralPath $storiesDir)) { exit 0 }
 
-$taskName = [string]$payload.task_name
-$taskId   = [string]$payload.task_id
-$teammate = [string]$payload.teammate_name
+$taskName = [string](Get-GuardProperty -InputObject $payload -Name 'task_name')
+$taskId = [string](Get-GuardProperty -InputObject $payload -Name 'task_id')
+$teammate = [string](Get-GuardProperty -InputObject $payload -Name 'teammate_name')
+$agentType = [string](Get-GuardProperty -InputObject $payload -Name 'agent_type')
 
 function Get-Frontmatter {
     param([string]$Path)
@@ -49,39 +44,53 @@ function Get-Frontmatter {
     try { $lines = Get-Content -LiteralPath $Path } catch { return $result }
     if ($lines.Count -eq 0 -or $lines[0].Trim() -ne '---') { return $result }
 
-    for ($i = 1; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
+    for ($index = 1; $index -lt $lines.Count; $index++) {
+        $line = $lines[$index]
         if ($line.Trim() -eq '---') { break }
-        $idx = $line.IndexOf(':')
-        if ($idx -lt 1) { continue }
-        $key = $line.Substring(0, $idx).Trim()
-        $value = $line.Substring($idx + 1).Trim().Trim('"').Trim("'")
+        $separator = $line.IndexOf(':')
+        if ($separator -lt 1) { continue }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim().Trim('"').Trim("'")
         if (-not $result.ContainsKey($key)) { $result[$key] = $value }
     }
     return $result
 }
 
+function Test-WindowsAcceptance {
+    param([string]$Command)
+
+    if ($Command -match '(?i)(^|[;&|]\s*)(bash|sh|zsh)\b') { return $false }
+    if ($Command -match '(^|\s)\./') { return $false }
+    if ($Command -match '(?i)/bin/') { return $false }
+    if ($Command -match '(?i)(\|\|\s*(true|:)|;\s*(true|:)\s*$)') { return $false }
+    if ($Command.Trim() -match '^(?i:true|:|exit\s+0|return\s+0)$') { return $false }
+    return $true
+}
+
 $stories = @()
 switch ($Event) {
     'TaskCompleted' {
-        # A story matches when its id or filename stem appears in the task name
-        # or id. Tasks mapping to no story are not gated.
         $needle = "$taskName$taskId"
         foreach ($file in Get-ChildItem -LiteralPath $storiesDir -Filter '*.md' -File) {
-            $fm = Get-Frontmatter -Path $file.FullName
-            $id = if ($fm.ContainsKey('id')) { $fm['id'] } else { $file.BaseName }
+            $frontmatter = Get-Frontmatter -Path $file.FullName
+            $id = if ($frontmatter.ContainsKey('id')) {
+                $frontmatter['id']
+            } else {
+                $file.BaseName
+            }
             if ($needle -like "*$id*" -or $needle -like "*$($file.BaseName)*") {
                 $stories += $file.FullName
             }
         }
     }
     'TeammateIdle' {
-        # No task to key off, so every story the squad marked finished is
-        # re-checked. This event is the last moment to catch a story that was
-        # marked done without passing its own acceptance check.
         foreach ($file in Get-ChildItem -LiteralPath $storiesDir -Filter '*.md' -File) {
-            $fm = Get-Frontmatter -Path $file.FullName
-            $status = if ($fm.ContainsKey('status')) { $fm['status'].ToLowerInvariant() } else { '' }
+            $frontmatter = Get-Frontmatter -Path $file.FullName
+            $status = if ($frontmatter.ContainsKey('status')) {
+                $frontmatter['status'].ToLowerInvariant()
+            } else {
+                ''
+            }
             if ('done', 'complete', 'completed', 'review' -contains $status) {
                 $stories += $file.FullName
             }
@@ -94,26 +103,51 @@ if ($stories.Count -eq 0) { exit 0 }
 
 $failures = New-Object System.Collections.Generic.List[string]
 
+if ('builder', 'test-engineer', 'prd-lead' -contains $agentType) {
+    try {
+        $changedPaths = Get-GuardChangedPaths -ProjectDir $projectDir
+        foreach ($changedPath in $changedPaths) {
+            $reason = Get-GuardWriteBlockReason -AgentType $agentType -RelativePath $changedPath
+            if ($null -ne $reason) {
+                $failures.Add("  - forbidden worktree change by ${agentType}: $changedPath ($reason)")
+            }
+        }
+    } catch {
+        $failures.Add("  - forbidden-path detection could not run: $($_.Exception.Message)")
+    }
+}
+
+$powershellHost = (Get-Process -Id $PID).Path
+
 foreach ($story in $stories) {
     $name = Split-Path -Leaf $story
-    $fm = Get-Frontmatter -Path $story
+    $frontmatter = Get-Frontmatter -Path $story
 
-    $prdRef = if ($fm.ContainsKey('prd_ref')) { $fm['prd_ref'] } else { '' }
+    $prdRef = if ($frontmatter.ContainsKey('prd_ref')) { $frontmatter['prd_ref'] } else { '' }
     if ([string]::IsNullOrWhiteSpace($prdRef)) {
-        $failures.Add("  - ${name}: missing 'prd_ref' in frontmatter. Every story must trace to a section of docs/prd.md.")
+        $failures.Add("  - ${name}: missing 'prd_ref' in frontmatter.")
         continue
     }
 
-    $acceptance = if ($fm.ContainsKey('acceptance')) { $fm['acceptance'] } else { '' }
+    $acceptance = if ($frontmatter.ContainsKey('acceptance')) {
+        $frontmatter['acceptance']
+    } else {
+        ''
+    }
     if ([string]::IsNullOrWhiteSpace($acceptance)) {
-        $failures.Add("  - ${name}: missing 'acceptance' in frontmatter. Add a command that exits 0 when the story is genuinely done.")
+        $failures.Add("  - ${name}: missing 'acceptance' in frontmatter.")
+        continue
+    }
+    if (-not (Test-WindowsAcceptance -Command $acceptance)) {
+        $failures.Add(
+            "  - ${name}: acceptance must be a Windows PowerShell command without POSIX-only syntax or status masking."
+        )
         continue
     }
 
-    # Run from the project root so acceptance commands can use relative paths.
     Push-Location -LiteralPath $projectDir
     try {
-        $output = & cmd.exe /c $acceptance 2>&1
+        $output = & $powershellHost -NoProfile -NonInteractive -Command $acceptance 2>&1
         $code = $LASTEXITCODE
     } catch {
         $output = $_.Exception.Message
@@ -124,16 +158,16 @@ foreach ($story in $stories) {
 
     if ($code -ne 0) {
         $tail = ($output | Select-Object -Last 20 | ForEach-Object { "      $_" }) -join "`n"
-        $failures.Add("  - ${name}: acceptance command failed (exit $code)`n      `$ $acceptance`n$tail")
+        $failures.Add(
+            "  - ${name}: acceptance command failed (exit $code)`n      PS> $acceptance`n$tail"
+        )
     }
 }
 
 if ($failures.Count -gt 0) {
-    # stderr on exit 2 becomes the reason Claude sees, so this is written as
-    # instructions to the agent rather than as an operator log line.
     $header = if ($Event -eq 'TeammateIdle') {
         $who = if ([string]::IsNullOrWhiteSpace($teammate)) { '' } else { " ($teammate)" }
-        "Not finished yet$who. Stories marked complete are still failing their gates:"
+        "Not finished yet$who. Completed stories still fail their gates:"
     } else {
         $what = if ([string]::IsNullOrWhiteSpace($taskName)) { 'this task' } else { $taskName }
         "Cannot mark `"$what`" complete. Its story does not pass the gate:"
@@ -143,11 +177,13 @@ if ($failures.Count -gt 0) {
         $header,
         ($failures -join "`n"),
         '',
-        'Fix the underlying problem and re-check. Do not edit the acceptance command to make it pass.'
+        'Fix the underlying problem and re-check. Do not weaken the acceptance command.'
     ) -join "`n"
 
+    Write-GuardAudit $projectDir $Event $agentType ($stories -join ',') "BLOCK: $message"
     [Console]::Error.WriteLine($message)
     exit 2
 }
 
+Write-GuardAudit $projectDir $Event $agentType ($stories -join ',') 'ALLOW'
 exit 0

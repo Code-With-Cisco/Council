@@ -1,20 +1,25 @@
 {
-  "name": "muster",
+  "name": "decagram-council",
+  "productName": "Decagram Council",
   "version": "0.1.0",
   "private": true,
-  "description": "Control surface for Claude Code's multi-agent runtime",
+  "description": "Windows control surface for Claude Code's multi-agent runtime",
+  "main": "dist/src/ui/main.js",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=20.11.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "harness": "tsx src/integration/harness/cli.ts",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && electron .",
+    "pack:win": "npm run build && electron-builder --win dir",
+    "dist:win": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
@@ -25,8 +30,44 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.PLACEHOLDER.decagram-council",
+    "productName": "Decagram Council",
+    "asar": true,
+    "files": [
+      "dist/src/**/*",
+      "src/ui/preload.cjs",
+      "src/ui/renderer/**/*",
+      "scripts/gates/*.ps1",
+      ".claude/agents/council-*.md",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "executableName": "Decagram Council"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Decagram Council"
+    }
   }
 }

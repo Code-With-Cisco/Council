@@ -1,0 +1,68 @@
+import { readFile } from 'node:fs/promises';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+import { buildStartSessionArgv } from '../src/integration/client.js';
+import { parseFrontmatter } from '../src/integration/fs/agentDefs.js';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const AGENT_DIR = path.join(REPO_ROOT, '.claude', 'agents');
+const ADVISORS = [
+  'council-contrarian',
+  'council-first-principles',
+  'council-expansionist',
+  'council-outsider',
+  'council-executor',
+] as const;
+
+describe('council agent definitions', () => {
+  it('gives every advisor a read-only string-form tool allowlist', async () => {
+    for (const advisor of ADVISORS) {
+      const source = await readFile(path.join(AGENT_DIR, `${advisor}.md`), 'utf8');
+      const frontmatter = parseFrontmatter(source);
+      expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
+      expect(frontmatter?.['permissionMode']).toBeUndefined();
+      expect(source).toContain('final output and address nobody');
+    }
+  });
+
+  it('keeps chairman in plan mode with the same read-only tools', async () => {
+    const source = await readFile(path.join(AGENT_DIR, 'council-chairman.md'), 'utf8');
+    const frontmatter = parseFrontmatter(source);
+    expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
+    expect(frontmatter?.['permissionMode']).toBe('plan');
+  });
+
+  it('declares the exact lead-to-advisor allowlist', async () => {
+    const source = await readFile(path.join(AGENT_DIR, 'council-lead.md'), 'utf8');
+    const frontmatter = parseFrontmatter(source);
+    expect(frontmatter?.['name']).toBe('council-lead');
+    expect(frontmatter?.['tools']).toBe(
+      'Agent(council-contrarian, council-first-principles, council-expansionist, council-outsider, council-executor, council-chairman), Read, Grep, Glob',
+    );
+    expect(source).toContain('five substantive responses');
+    expect(source).toContain('Response A');
+    expect(source).toContain('chairman');
+  });
+});
+
+describe('council dispatch argv', () => {
+  it('passes the exact question as one argv element without a shell', () => {
+    const question = 'Review "C:\\Program Files\\Council"; Remove-Item should remain text.';
+    const argv = buildStartSessionArgv({
+      agent: 'council-lead',
+      name: 'Council',
+      prompt: question,
+      cwd: 'C:\\work\\Council',
+    });
+    expect(argv).toEqual([
+      '--bg',
+      '--agent',
+      'council-lead',
+      '--name',
+      'Council',
+      question,
+    ]);
+  });
+});
