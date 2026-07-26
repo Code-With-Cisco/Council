@@ -2,7 +2,7 @@
  * The app's own roster config: which five specialists exist, which subagent
  * definition each one runs, and where each one lives.
  *
- * This file belongs to Muster, not to Claude Code, so it is stored in the app's
+ * This file belongs to Decagram Council, not to Claude Code, so it is stored in the app's
  * data directory rather than under `<config>`. The Claude config directory is
  * read-only to this app apart from its own hook scripts.
  *

@@ -17,7 +17,7 @@ import type {
   StartedSession,
 } from './types.js';
 import { runClaude, runClaudeJson, type ExecOptions } from './cli/exec.js';
-import { detectUnknownAgentWarning } from './cli/errors.js';
+import { detectUnknownAgentWarning, summarizeOutput } from './cli/errors.js';
 import { locateClaude, type LocatedCli, type LocateOptions } from './cli/locate.js';
 import { parseDaemonStatus } from './parse/daemon.js';
 import { parseRoster, parseStartedSession } from './parse/roster.js';
@@ -61,6 +61,21 @@ export interface ClaudeClientOptions {
   readonly locate?: LocateOptions | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly defaultTimeoutMs?: number | undefined;
+}
+
+export function buildStartSessionArgv(request: StartSessionRequest): string[] {
+  if (request.prompt.trim() === '') {
+    throw new Error('start() requires a non-empty prompt');
+  }
+
+  const argv = ['--bg'];
+  if (request.agent !== undefined) argv.push('--agent', request.agent);
+  if (request.name !== undefined) argv.push('--name', request.name);
+  if (request.model !== undefined) argv.push('--model', request.model);
+  if (request.effort !== undefined) argv.push('--effort', request.effort);
+  if (request.permissionMode !== undefined) argv.push('--permission-mode', request.permissionMode);
+  argv.push(request.prompt);
+  return argv;
 }
 
 export class ClaudeClient {
@@ -125,17 +140,7 @@ export class ClaudeClient {
    * passed as one argv element — no shell is involved, so it needs no quoting.
    */
   async start(request: StartSessionRequest): Promise<CliResult<StartSessionOutcome>> {
-    if (request.prompt.trim() === '') {
-      throw new Error('start() requires a non-empty prompt');
-    }
-
-    const argv = ['--bg'];
-    if (request.agent !== undefined) argv.push('--agent', request.agent);
-    if (request.name !== undefined) argv.push('--name', request.name);
-    if (request.model !== undefined) argv.push('--model', request.model);
-    if (request.effort !== undefined) argv.push('--effort', request.effort);
-    if (request.permissionMode !== undefined) argv.push('--permission-mode', request.permissionMode);
-    argv.push(request.prompt);
+    const argv = buildStartSessionArgv(request);
 
     // Dispatch cold-starts the supervisor ("Starting background service…"),
     // which is slower than a steady-state call.
@@ -204,8 +209,29 @@ export class ClaudeClient {
    * That is expected for a cold session, not a fault — attaching or replying
    * wakes it, after which logs succeed.
    */
-  logs(id: string): Promise<CliResult<string>> {
-    return this.exec(['logs', id]);
+  async logs(id: string): Promise<CliResult<string>> {
+    const argv = ['logs', id];
+    const result = await this.exec(argv, { treatOutputAsSuccess: true });
+    if (!result.ok) return result;
+
+    const raw = result.value;
+    let kind: 'unknown-session' | 'daemon-unreachable' | undefined;
+    if (/^No job matching\b/im.test(raw)) {
+      kind = 'unknown-session';
+    } else if (new RegExp(`^Couldn't read logs for ${escapeRegExp(id)}\\b`, 'im').test(raw)) {
+      kind = 'daemon-unreachable';
+    }
+    if (kind === undefined) return result;
+
+    return {
+      ok: false,
+      kind,
+      message: summarizeOutput(raw, `claude logs ${id} failed`),
+      raw,
+      argv,
+      exitCode: 0,
+      durationMs: result.durationMs,
+    };
   }
 
   /** Stops a session, keeping its conversation. Resume later via attach. */
@@ -264,4 +290,8 @@ export class ClaudeClient {
     if (options.keepWorkers !== false) argv.push('--keep-workers');
     return this.exec(argv, { timeoutMs: 30_000 });
   }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

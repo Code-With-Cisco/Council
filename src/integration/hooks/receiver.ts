@@ -22,12 +22,12 @@ import type { ClaudePaths } from '../paths.js';
 import { parseHookDelivery, type HookDelivery } from './events.js';
 
 /** Header carrying the shared secret. */
-export const SECRET_HEADER = 'x-muster-secret';
+export const SECRET_HEADER = 'x-decagram-council-secret';
 
 /** Hook payloads are small; anything larger is malformed or hostile. */
 const MAX_BODY_BYTES = 256 * 1024;
 
-/** Contents of `<config>/muster/receiver.json`, which hook scripts read at fire time. */
+/** Contents of `<config>/decagram-council/receiver.json`, which hook scripts read at fire time. */
 export interface ReceiverDescriptor {
   readonly version: 1;
   readonly port: number;

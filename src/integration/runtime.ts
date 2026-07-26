@@ -79,7 +79,7 @@ export interface BootReport {
   readonly receiver: ReceiverDescriptor | undefined;
 }
 
-export class MusterRuntime {
+export class DecagramCouncilRuntime {
   private readonly watcher: ClaudeStateWatcher;
   private readonly receiver: HookReceiver;
   private timer: NodeJS.Timeout | undefined;
@@ -286,6 +286,45 @@ export class MusterRuntime {
       effort: member.effort,
     });
 
+    this.scheduleRefresh();
+    return result;
+  }
+
+  /**
+   * Starts a complete council review through the main-session council lead.
+   *
+   * The question is passed as one argv element by ClaudeClient; no shell
+   * interpolation occurs. The definition is validated immediately because the
+   * council lead is not part of the persistent specialist roster.
+   */
+  async startCouncilReview(
+    question: string,
+    cwd: string,
+  ): Promise<CliResult<StartSessionOutcome>> {
+    if (question.trim() === '') {
+      throw new Error('startCouncilReview() requires a non-empty question');
+    }
+
+    const definitions = await listAgentDefinitions(this.options.paths, cwd);
+    const validation = validateAgentName('council-lead', definitions);
+    if (!validation.found) {
+      return {
+        ok: false,
+        kind: 'cli-error',
+        message: 'No subagent definition named "council-lead".',
+        raw: '',
+        argv: ['--bg', '--agent', 'council-lead'],
+        exitCode: null,
+        durationMs: 0,
+      };
+    }
+
+    const result = await this.options.client.start({
+      agent: 'council-lead',
+      name: 'Council',
+      cwd,
+      prompt: question,
+    });
     this.scheduleRefresh();
     return result;
   }

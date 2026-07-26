@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <title>Decagram Council</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CLAUDE CODE CONTROL SURFACE</p>
+          <h1>Decagram Council</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="connection-state" class="connection-pill">Starting…</span>
+          <button id="wake-button" class="button button-accent" hidden>Wake the squad</button>
+        </div>
+      </header>
+
+      <section id="attention-channel" class="attention-channel" hidden>
+        <div>
+          <span class="attention-kicker">ATTENTION</span>
+          <strong id="attention-title"></strong>
+          <span id="attention-detail"></span>
+        </div>
+        <span id="attention-count" class="count-badge"></span>
+      </section>
+
+      <nav class="tabs" aria-label="Primary views">
+        <button class="tab is-active" data-view="squad">Squad</button>
+        <button class="tab" data-view="council">Council Review</button>
+        <button class="tab" data-view="diagnostics">Diagnostics</button>
+      </nav>
+
+      <main>
+        <section id="view-squad" class="view is-active">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">SPECIALISTS</p>
+              <h2>Your persistent squad</h2>
+            </div>
+            <span id="updated-at" class="muted"></span>
+          </div>
+          <div class="squad-layout">
+            <div id="squad-grid" class="squad-grid" aria-live="polite"></div>
+            <aside id="session-detail" class="detail-panel">
+              <p class="eyebrow">SESSION DETAIL</p>
+              <h3>Select a specialist</h3>
+              <p class="muted">Recent output and direct replies appear here.</p>
+            </aside>
+          </div>
+        </section>
+
+        <section id="view-council" class="view">
+          <div class="council-card">
+            <p class="eyebrow">SIX-PERSPECTIVE DECISION PIPELINE</p>
+            <h2>Convene the council</h2>
+            <p class="lede">
+              Five advisors analyze independently. The chairman receives their shuffled findings
+              and returns the final verdict.
+            </p>
+            <form id="council-form">
+              <label for="council-question">Decision or question</label>
+              <textarea id="council-question" rows="8"
+                placeholder="What decision should the council evaluate?" required></textarea>
+              <label for="council-cwd">Project folder</label>
+              <input id="council-cwd" type="text" required />
+              <div class="form-actions">
+                <button class="button button-primary" type="submit">Start council review</button>
+                <span id="council-feedback" class="muted" role="status"></span>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section id="view-diagnostics" class="view">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">WINDOWS PREFLIGHT</p>
+              <h2>Diagnostics</h2>
+            </div>
+            <span id="preflight-time" class="muted"></span>
+          </div>
+          <div id="diagnostics-grid" class="diagnostics-grid"></div>
+          <section class="message-panel">
+            <h3>Startup messages</h3>
+            <ul id="startup-messages"></ul>
+          </section>
+        </section>
+      </main>
+
+      <footer>
+        <span id="global-feedback" role="status">Ready.</span>
+        <span>Windows-only preview</span>
+      </footer>
+    </div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
+

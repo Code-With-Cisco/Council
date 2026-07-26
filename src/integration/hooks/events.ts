@@ -10,8 +10,8 @@
  * is optional and narrowed at the boundary.
  */
 
-/** The subset of hook events Muster subscribes to. */
-export type MusterHookEvent =
+/** The subset of hook events Decagram Council subscribes to. */
+export type DecagramCouncilHookEvent =
   | 'Notification'
   | 'SubagentStart'
   | 'SubagentStop'
@@ -20,7 +20,7 @@ export type MusterHookEvent =
   | 'TeammateIdle'
   | 'PostToolUseFailure';
 
-export const MUSTER_HOOK_EVENTS: readonly MusterHookEvent[] = [
+export const DECAGRAM_COUNCIL_HOOK_EVENTS: readonly DecagramCouncilHookEvent[] = [
   'Notification',
   'SubagentStart',
   'SubagentStop',
@@ -100,7 +100,7 @@ export type HookPayload =
 
 /** A validated inbound hook delivery. */
 export interface HookDelivery {
-  readonly event: MusterHookEvent;
+  readonly event: DecagramCouncilHookEvent;
   readonly payload: HookPayload;
   /** Short session id derived from `session_id`, for correlating with roster rows. */
   readonly shortId: string | undefined;
@@ -123,12 +123,12 @@ function asString(value: unknown): string | undefined {
  * attacker-controllable data on a socket any local process can reach.
  */
 export function parseHookDelivery(event: string, body: unknown): HookDelivery | null {
-  if (!(MUSTER_HOOK_EVENTS as readonly string[]).includes(event)) return null;
+  if (!(DECAGRAM_COUNCIL_HOOK_EVENTS as readonly string[]).includes(event)) return null;
   if (!isRecord(body)) return null;
 
   const sessionId = asString(body['session_id']);
   return {
-    event: event as MusterHookEvent,
+    event: event as DecagramCouncilHookEvent,
     payload: body as HookPayload,
     shortId: sessionId?.slice(0, 8),
     receivedAt: new Date(),

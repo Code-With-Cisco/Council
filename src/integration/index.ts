@@ -1,5 +1,5 @@
 /**
- * Muster's Claude Code integration layer — the complete public API.
+ * Decagram Council's Claude Code integration layer — the complete public API.
  *
  * This module is deliberately free of Electron and of any UI concern: it is
  * importable from a plain Node script, which is what the test harness
@@ -39,7 +39,7 @@ export { KNOWN_WAITING_FOR, SESSION_STATES } from './types.js';
 
 export { ClaudePaths, ProjectPaths, claudeConfigDir } from './paths.js';
 
-export { ClaudeClient } from './client.js';
+export { ClaudeClient, buildStartSessionArgv } from './client.js';
 export type {
   ClaudeClientOptions,
   StartExecRequest,
@@ -99,12 +99,12 @@ export {
 } from './roster/unified.js';
 export type { BuildRosterInput, UnifiedRoster } from './roster/unified.js';
 
-export { MUSTER_HOOK_EVENTS, isNeedsInput, parseHookDelivery } from './hooks/events.js';
+export { DECAGRAM_COUNCIL_HOOK_EVENTS, isNeedsInput, parseHookDelivery } from './hooks/events.js';
 export type {
   HookBase,
   HookDelivery,
   HookPayload,
-  MusterHookEvent,
+  DecagramCouncilHookEvent,
   NotificationPayload,
   NotificationType,
   SubagentPayload,
@@ -115,7 +115,7 @@ export type {
 export { HookReceiver, SECRET_HEADER } from './hooks/receiver.js';
 export type { ReceiverDescriptor, ReceiverOptions } from './hooks/receiver.js';
 export {
-  MUSTER_HOOK_MARKER,
+  DECAGRAM_COUNCIL_HOOK_MARKER,
   generateHookConfig,
   installHooks,
   mergeHookConfig,
@@ -123,18 +123,30 @@ export {
   removeHookConfig,
 } from './hooks/generate.js';
 export type { CommandHookHandler, HookInstallPlan, HooksConfig, InstallResult } from './hooks/generate.js';
-export { BASH_HOOK_FILENAME, POWERSHELL_HOOK_FILENAME, bashHookScript, powershellHookScript } from './hooks/scripts.js';
+export { POWERSHELL_HOOK_FILENAME, powershellHookScript } from './hooks/scripts.js';
 
 export {
-  GATE_BASH,
   GATE_MARKER,
   GATE_POWERSHELL,
+  POWERSHELL_GUARD_FILES,
+  SHELL_DISPATCH_POWERSHELL,
+  WRITE_DISPATCH_POWERSHELL,
   bundledGatesDir,
   generateGateConfig,
   installGates,
   planGateInstall,
 } from './gates/install.js';
-export type { GateInstallPlan } from './gates/install.js';
+export type {
+  GateInstallPlan,
+  GateScriptLocation,
+  GenerateGateOptions,
+} from './gates/install.js';
+export { runGuardSelfTest } from './gates/selfTest.js';
+export type {
+  GuardSelfTestOptions,
+  GuardSelfTestResult,
+  GuardSelfTestStatus,
+} from './gates/selfTest.js';
 
 export { AttachSession, loadPty, sendReply } from './pty/attach.js';
 export type { AttachOptions, ReplyOptions, ReplyOutcome } from './pty/attach.js';
@@ -142,5 +154,11 @@ export type { AttachOptions, ReplyOptions, ReplyOutcome } from './pty/attach.js'
 export { boardCounts, readBoard, worktreeBoards } from './board/read.js';
 export type { Board, Epic, GateStatus, Story } from './board/read.js';
 
-export { MusterRuntime } from './runtime.js';
+export { DecagramCouncilRuntime } from './runtime.js';
 export type { BootReport, RuntimeOptions, Snapshot } from './runtime.js';
+export { runLaunchPreflight } from './preflight.js';
+export type {
+  ExecutableStatus,
+  LaunchPreflight,
+  LaunchPreflightOptions,
+} from './preflight.js';

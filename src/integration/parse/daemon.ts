@@ -46,6 +46,7 @@ export function parseDaemonStatus(raw: string): DaemonStatus {
   const notRunning = /^\s*not running\s*$/im.test(raw);
   const pidText = field(raw, 'pid');
   const pid = pidText === undefined ? undefined : Number.parseInt(pidText, 10);
+  const recognized = notRunning || (pid !== undefined && !Number.isNaN(pid));
 
   const controlLine = field(raw, 'control\\.sock');
   const reachable = controlLine !== undefined && /^reachable\b/i.test(controlLine);
@@ -65,6 +66,7 @@ export function parseDaemonStatus(raw: string): DaemonStatus {
   const rosterPresent = rosterLine !== undefined && !/^absent\b/i.test(rosterLine);
 
   return {
+    recognized,
     running: !notRunning && pid !== undefined && !Number.isNaN(pid),
     pid: pid === undefined || Number.isNaN(pid) ? undefined : pid,
     version: field(raw, 'version'),

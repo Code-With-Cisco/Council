@@ -6,7 +6,7 @@
  * ask for a named path and get a resolved absolute one.
  *
  * WRITE POLICY: the app treats the Claude config directory as read-only with
- * exactly two exceptions, both under `musterDir()`: its own hook scripts and
+ * exactly two exceptions, both under `decagramCouncilDir()`: its own hook scripts and
  * the receiver port file. Settings edits go through an explicit user-approved
  * flow and are the only writes outside that subtree.
  */
@@ -125,25 +125,25 @@ export class ClaudePaths {
     return path.join(this.configDir, 'tasks', team);
   }
 
-  /** `<config>/muster` — the only subtree this app writes to. */
-  musterDir(): string {
-    return path.join(this.configDir, 'muster');
+  /** `<config>/decagram-council` — the only subtree this app writes to. */
+  decagramCouncilDir(): string {
+    return path.join(this.configDir, 'decagram-council');
   }
 
-  /** `<config>/muster/hooks` — generated bash + PowerShell hook scripts. */
+  /** `<config>/decagram-council/hooks` — generated PowerShell hook scripts. */
   hookScriptsDir(): string {
-    return path.join(this.musterDir(), 'hooks');
+    return path.join(this.decagramCouncilDir(), 'hooks');
   }
 
   /**
-   * `<config>/muster/receiver.json` — the well-known file carrying the push
+   * `<config>/decagram-council/receiver.json` — the well-known file carrying the push
    * receiver's randomly chosen port and shared secret.
    *
    * Hook scripts read this at fire time, which is what lets the receiver bind
    * an ephemeral port instead of a fixed one.
    */
   receiverFile(): string {
-    return path.join(this.musterDir(), 'receiver.json');
+    return path.join(this.decagramCouncilDir(), 'receiver.json');
   }
 }
 

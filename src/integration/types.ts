@@ -140,6 +140,11 @@ export interface Session {
  */
 export interface DaemonStatus {
   /**
+   * False when the CLI prose does not match a verified shape. The UI must show
+   * "unknown", never confidently reinterpret an unverified Windows format.
+   */
+  readonly recognized: boolean;
+  /**
    * A down daemon is NORMAL, not an error: service install is disabled in
    * v2.1.220, so the supervisor starts on demand and exits when the last
    * client disconnects. Never surface this as a fault.

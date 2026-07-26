@@ -1,56 +1,117 @@
 /**
- * Installing the story gates into a project.
+ * Installing Decagram Council's Windows-only PowerShell guards into a project.
  *
- * The gate scripts live in this repo (scripts/gates/) and are copied into
- * `<project>/.claude/hooks/` by an explicit app action, then wired into
- * `<project>/.claude/settings.json`.
- *
- * Unlike the notification forwarders these hooks are synchronous and blocking —
- * that is their whole purpose. `async` would make exit code 2 meaningless.
+ * Scripts are copied into `<project>/.claude/hooks/` by an explicit app action.
+ * Hook registration is generated rather than hand-authored so the write,
+ * shell, and story gates stay one coherent unit.
  */
 
-import { mkdir, readFile, writeFile, rename, chmod, copyFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProjectPaths } from '../paths.js';
-import { mergeHookConfig, type HooksConfig } from '../hooks/generate.js';
+import { mergeHookConfig, type CommandHookHandler, type HooksConfig } from '../hooks/generate.js';
 
-export const GATE_BASH = 'story-gate.sh';
 export const GATE_POWERSHELL = 'story-gate.ps1';
+export const WRITE_DISPATCH_POWERSHELL = 'agent-write-dispatch.ps1';
+export const SHELL_DISPATCH_POWERSHELL = 'agent-shell-dispatch.ps1';
 
-/** Identifies gate handlers so re-installing replaces rather than duplicates. */
-export const GATE_MARKER = 'muster-story-gate';
+export const POWERSHELL_GUARD_FILES = [
+  '_guard-lib.ps1',
+  WRITE_DISPATCH_POWERSHELL,
+  SHELL_DISPATCH_POWERSHELL,
+  'builder-write-guard.ps1',
+  'test-engineer-write-guard.ps1',
+  'prd-lead-write-guard.ps1',
+  'guard-self-test.ps1',
+  GATE_POWERSHELL,
+] as const;
 
-/** Locates this repo's `scripts/gates` directory from the compiled module. */
+/** Identifies handlers so re-installing replaces rather than duplicates. */
+export const GATE_MARKER = 'decagram-council-story-gate';
+
+export type GateScriptLocation = 'installed' | 'source';
+
+export interface GenerateGateOptions {
+  /**
+   * `installed` targets `.claude/hooks` in an app-managed project.
+   * `source` targets this repository's checked-in `scripts/gates` directory.
+   */
+  readonly scriptLocation?: GateScriptLocation | undefined;
+}
+
+/** Locates this repo's checked-in PowerShell scripts. */
 export function bundledGatesDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  // src/integration/gates -> repo root, and dist/... resolves the same way.
   return path.resolve(here, '..', '..', '..', 'scripts', 'gates');
 }
 
-/**
- * Builds the project hook config for the gates.
- *
- * Deliberately NOT async, and with a generous timeout: an acceptance command is
- * usually a test run, and killing it at the default would report a passing
- * story as a gate failure.
- */
-export function generateGateConfig(projectDir: string, windows = process.platform === 'win32'): HooksConfig {
-  const paths = new ProjectPaths(projectDir);
-  const script = path.join(paths.gateScriptsDir(), windows ? GATE_POWERSHELL : GATE_BASH);
+function powershellCommand(
+  filename: string,
+  args: readonly string[],
+  location: GateScriptLocation,
+): string {
+  const directory = location === 'source' ? 'scripts/gates' : '.claude/hooks';
+  const script = `\${CLAUDE_PROJECT_DIR}/${directory}/${filename}`;
+  const quotedArgs = args.map((arg) => `'${arg.replaceAll("'", "''")}'`).join(' ');
+  return `& "${script}"${quotedArgs === '' ? '' : ` ${quotedArgs}`}`;
+}
 
-  const handler = (event: 'TaskCompleted' | 'TeammateIdle') => ({
-    type: 'command' as const,
-    command: script,
-    args: [event],
-    ...(windows ? { shell: 'powershell' as const } : {}),
-    timeout: 600,
-    statusMessage: GATE_MARKER,
-  });
+function handler(
+  filename: string,
+  args: readonly string[],
+  location: GateScriptLocation,
+  statusMessage = GATE_MARKER,
+): CommandHookHandler {
+  return {
+    type: 'command',
+    command: powershellCommand(filename, args, location),
+    shell: 'powershell',
+    timeout: filename === GATE_POWERSHELL ? 600 : 30,
+    statusMessage,
+  };
+}
+
+/**
+ * Builds all enforcement hooks for a Windows host.
+ *
+ * Shell form is deliberate. Claude Code ignores `shell: "powershell"` when
+ * `args` is present, and Windows cannot spawn a `.ps1` file directly.
+ */
+export function generateGateConfig(options: GenerateGateOptions = {}): HooksConfig {
+  const location = options.scriptLocation ?? 'installed';
 
   return {
-    TaskCompleted: [{ hooks: [handler('TaskCompleted')] }],
-    TeammateIdle: [{ hooks: [handler('TeammateIdle')] }],
+    PreToolUse: [
+      {
+        matcher: 'Edit|Write',
+        hooks: [
+          handler(
+            WRITE_DISPATCH_POWERSHELL,
+            [],
+            location,
+            'decagram-council-write-guard',
+          ),
+        ],
+      },
+      {
+        matcher: 'PowerShell',
+        hooks: [
+          handler(
+            SHELL_DISPATCH_POWERSHELL,
+            [],
+            location,
+            'decagram-council-shell-guard',
+          ),
+        ],
+      },
+    ],
+    TaskCompleted: [
+      { hooks: [handler(GATE_POWERSHELL, ['TaskCompleted'], location)] },
+    ],
+    TeammateIdle: [
+      { hooks: [handler(GATE_POWERSHELL, ['TeammateIdle'], location)] },
+    ],
   };
 }
 
@@ -71,35 +132,28 @@ export async function planGateInstall(projectDir: string): Promise<GateInstallPl
     const parsed: unknown = JSON.parse(await readFile(paths.projectSettingsFile(), 'utf8'));
     if (typeof parsed === 'object' && parsed !== null) current = parsed as Record<string, unknown>;
   } catch {
-    // Missing or unparseable: treated as empty here, and installGates refuses
-    // to overwrite a file it could not parse.
+    // Missing or unparseable is treated as empty for planning. installGates
+    // still refuses to overwrite an existing file it cannot parse.
   }
 
-  const merged = mergeHookConfig(current, generateGateConfig(projectDir));
+  const merged = mergeHookConfig(current, generateGateConfig());
 
   return {
     projectDir,
-    // Both dialects are installed so the project works for collaborators on
-    // either OS — these files are checked into the project repo.
-    scriptTargets: [
-      {
-        from: path.join(source, GATE_BASH),
-        to: path.join(paths.gateScriptsDir(), GATE_BASH),
-        mode: 0o755,
-      },
-      {
-        from: path.join(source, GATE_POWERSHELL),
-        to: path.join(paths.gateScriptsDir(), GATE_POWERSHELL),
-        mode: 0o644,
-      },
-    ],
+    scriptTargets: POWERSHELL_GUARD_FILES.map((filename) => ({
+      from: path.join(source, filename),
+      to: path.join(paths.gateScriptsDir(), filename),
+      mode: 0o644,
+    })),
     settingsFile: paths.projectSettingsFile(),
     mergedSettings: merged,
     diffPreview: JSON.stringify({ hooks: merged['hooks'] }, null, 2),
   };
 }
 
-export async function installGates(plan: GateInstallPlan): Promise<{ written: readonly string[] }> {
+export async function installGates(
+  plan: GateInstallPlan,
+): Promise<{ written: readonly string[] }> {
   const written: string[] = [];
 
   for (const target of plan.scriptTargets) {
@@ -112,9 +166,10 @@ export async function installGates(plan: GateInstallPlan): Promise<{ written: re
   let existing: string | undefined;
   try {
     existing = await readFile(plan.settingsFile, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+
   if (existing !== undefined) {
     try {
       JSON.parse(existing);
@@ -126,7 +181,7 @@ export async function installGates(plan: GateInstallPlan): Promise<{ written: re
   }
 
   await mkdir(path.dirname(plan.settingsFile), { recursive: true });
-  const temp = `${plan.settingsFile}.muster.tmp`;
+  const temp = `${plan.settingsFile}.decagram.tmp`;
   await writeFile(temp, `${JSON.stringify(plan.mergedSettings, null, 2)}\n`, 'utf8');
   await rename(temp, plan.settingsFile);
   written.push(plan.settingsFile);

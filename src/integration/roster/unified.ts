@@ -75,17 +75,16 @@ function matchesMember(session: Session, member: RosterMember): boolean {
 /**
  * Picks one session when several match a specialist.
  *
- * Prefers a session that still has a live process, then the most recently
- * started, so a stale completed run never displaces the current one.
+ * Prefers the most recently started matching background session.
+ *
+ * Background rows carry no pid in the probed CLI surface, so pid cannot be a
+ * meaningful tiebreaker here.
  */
 function pickPrimary(candidates: readonly Session[]): Session | undefined {
   if (candidates.length <= 1) return candidates[0];
-  return [...candidates].sort((a, b) => {
-    const liveA = a.pid !== undefined ? 1 : 0;
-    const liveB = b.pid !== undefined ? 1 : 0;
-    if (liveA !== liveB) return liveB - liveA;
-    return (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0);
-  })[0];
+  return [...candidates].sort(
+    (a, b) => (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0),
+  )[0];
 }
 
 export interface BuildRosterInput {

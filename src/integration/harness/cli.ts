@@ -178,8 +178,8 @@ async function roundtrip(): Promise<void> {
   const client = await connect();
   const paths = new ClaudePaths();
   const agent = flag('agent');
-  const cwd = flag('cwd') ?? (await mkdtemp(path.join(tmpdir(), 'muster-harness-')));
-  const label = `muster-harness-${Date.now().toString(36)}`;
+  const cwd = flag('cwd') ?? (await mkdtemp(path.join(tmpdir(), 'decagram-harness-')));
+  const label = `decagram-harness-${Date.now().toString(36)}`;
 
   log(`cwd:   ${cwd}`);
   log(`mode:  ${agent === undefined ? 'shell job (--exec, no model quota)' : `agent "${agent}" (uses quota)`}`);
@@ -188,7 +188,7 @@ async function roundtrip(): Promise<void> {
     agent === undefined
       ? expectOk(
           await client.startExec({
-            command: `echo muster-harness-ok-${label}; sleep 30`,
+            command: `echo decagram-harness-ok-${label}; sleep 30`,
             name: label,
             cwd,
           }),

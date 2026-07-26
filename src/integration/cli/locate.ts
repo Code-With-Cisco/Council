@@ -1,11 +1,9 @@
 /**
  * Finding the `claude` binary.
  *
- * A desktop app is not launched from the user's login shell, so PATH is often
- * missing the entries a terminal would have — on macOS a GUI process typically
- * gets `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else. Relying on PATH alone
- * strands users whose CLI came from nvm, Homebrew, or the VS Code extension, so
- * known install locations are probed directly.
+ * A Windows desktop app can inherit a different PATH from the user's terminal.
+ * Relying on PATH alone strands users whose CLI came from the native installer,
+ * npm, or a VS Code-family extension, so known Windows locations are probed.
  */
 
 import { readdir, access } from 'node:fs/promises';
@@ -23,8 +21,7 @@ import { runClaude } from './exec.js';
  */
 export const MINIMUM_CLAUDE_VERSION = '2.1.220';
 
-const isWindows = process.platform === 'win32';
-const BIN = isWindows ? 'claude.exe' : 'claude';
+const BIN = 'claude.exe';
 
 export interface LocatedCli {
   readonly bin: string;
@@ -44,7 +41,7 @@ export interface LocateOptions {
 
 async function isExecutable(candidate: string): Promise<boolean> {
   try {
-    await access(candidate, isWindows ? constants.F_OK : constants.X_OK);
+    await access(candidate, constants.F_OK);
     return true;
   } catch {
     return false;
@@ -53,21 +50,19 @@ async function isExecutable(candidate: string): Promise<boolean> {
 
 /** Directories the CLI installs itself into, ordered by how current they tend to be. */
 function wellKnownDirs(home: string, env: NodeJS.ProcessEnv): string[] {
-  if (isWindows) {
-    const localAppData = env['LOCALAPPDATA'];
-    const dirs = [path.join(home, '.local', 'bin'), path.join(home, '.claude', 'local')];
-    if (localAppData !== undefined && localAppData !== '') {
-      dirs.unshift(path.join(localAppData, 'Programs', 'claude'));
-    }
-    return dirs;
+  const dirs = [path.join(home, '.local', 'bin'), path.join(home, '.claude', 'local')];
+  const localAppData = env['LOCALAPPDATA'];
+  if (localAppData !== undefined && localAppData !== '') {
+    dirs.unshift(
+      path.join(localAppData, 'Programs', 'claude'),
+      path.join(localAppData, 'AnthropicClaude'),
+    );
   }
-  return [
-    path.join(home, '.local', 'bin'),
-    path.join(home, '.claude', 'local'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-  ];
+  const appData = env['APPDATA'];
+  if (appData !== undefined && appData !== '') {
+    dirs.push(path.join(appData, 'npm', 'node_modules', '@anthropic-ai', 'claude-code'));
+  }
+  return dirs;
 }
 
 /**
