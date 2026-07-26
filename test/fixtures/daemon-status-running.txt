@@ -1,0 +1,12 @@
+pid:     9806
+version: 2.1.220
+uptime:  4s
+origin:  transient — started on-demand by `claude --bg` (pid 9798) in /private/tmp/scratch
+config:  /Users/cisco/.claude/daemon.json
+log:     /Users/cisco/.claude/daemon.log
+
+bg sessions:
+  sock dir:     /tmp/cc-daemon-501/1d662268
+  control.sock: reachable
+  bg workers:   1 running (control.sock), 1 in roster.json
+  roster.json:  updated 4s ago
