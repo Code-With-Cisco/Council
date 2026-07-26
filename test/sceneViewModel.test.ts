@@ -31,15 +31,26 @@ async function mapper(): Promise<{
     },
   ): unknown;
   mapSnapshot(snapshot: unknown, options: unknown): {
-    agents: { key: string; mode: string }[];
+    agents: {
+      key: string;
+      mode: string;
+      missionBadge?: { label: string; missionTitle: string };
+    }[];
     stale: boolean;
   };
 }> {
-  const source = await readFile(
-    path.join(root, 'src', 'ui', 'renderer', 'scene-view-model.js'),
-    'utf8',
-  );
+  const [missionSource, source] = await Promise.all([
+    readFile(
+      path.join(root, 'src', 'ui', 'renderer', 'mission-view-model.js'),
+      'utf8',
+    ),
+    readFile(
+      path.join(root, 'src', 'ui', 'renderer', 'scene-view-model.js'),
+      'utf8',
+    ),
+  ]);
   const window: Record<string, unknown> = {};
+  runInNewContext(missionSource, { window });
   runInNewContext(source, { window });
   return window['CouncilSceneViewModel'] as Awaited<ReturnType<typeof mapper>>;
 }
@@ -106,6 +117,36 @@ describe('Snapshot -> pixel office scene view model', () => {
         { page: 0, perPage: 5, runtimeAvailable: true },
       ).stale,
     ).toBe(true);
+  });
+
+  it('adds the same durable Mission assignment used by cards to the pixel scene', async () => {
+    const view = await mapper();
+    const scene = view.mapSnapshot(
+      { roster: { squad: [slot()] } },
+      {
+        page: 0,
+        perPage: 5,
+        runtimeAvailable: true,
+        missionState: {
+          projection: {
+            assignmentsByProfileId: {
+              'profile-12345678': [
+                {
+                  missionTitle: 'Provider-neutral missions',
+                  taskTitle: 'Mission UI',
+                  taskState: 'running',
+                  providerId: 'codex',
+                },
+              ],
+            },
+          },
+        },
+      },
+    );
+    expect(scene.agents[0]?.missionBadge).toMatchObject({
+      label: 'Mission UI',
+      missionTitle: 'Provider-neutral missions',
+    });
   });
 
   it('disables definition-based starts for missing, ambiguous, stale, and untrusted states', async () => {

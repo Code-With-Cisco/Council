@@ -144,6 +144,30 @@ async function connectedFixture(
 }
 
 describe('CodexAppServerClient', () => {
+  it('rejects unsafe transport limits before opening a provider process', () => {
+    const base = {
+      executable: 'codex',
+      clientVersion: '0.1.0',
+    };
+    for (const [name, value] of [
+      ['requestTimeoutMs', 0],
+      ['approvalTimeoutMs', -1],
+      ['maxLineBytes', Number.NaN],
+      ['maxOutputDeltaChars', Number.POSITIVE_INFINITY],
+      ['maxStderrChars', 1.5],
+      ['maxPendingRequests', Number.MAX_SAFE_INTEGER + 1],
+      ['maxPendingApprovals', 0],
+    ] as const) {
+      expect(
+        () =>
+          new CodexAppServerClient({
+            ...base,
+            [name]: value,
+          }),
+      ).toThrow(`${name} must be a positive safe integer.`);
+    }
+  });
+
   it('starts one connection, initializes exactly once, and exposes only non-secret auth state', async () => {
     const connection = respondingConnection();
     const factory = vi.fn(() => connection);
@@ -227,8 +251,10 @@ describe('CodexAppServerClient', () => {
           connection.server({ id, result: { thread: baseThread } });
           break;
         case 'turn/start':
-        case 'turn/steer':
           connection.server({ id, result: { turn: baseTurn } });
+          break;
+        case 'turn/steer':
+          connection.server({ id, result: { turnId: '019c-turn' } });
           break;
         case 'turn/interrupt':
           connection.server({ id, result: {} });
@@ -438,6 +464,20 @@ describe('CodexAppServerClient', () => {
     const oversizedConnect = oversizedClient.connect();
     oversizedConnection.raw('123456789');
     await expect(oversizedConnect).rejects.toMatchObject({
+      code: 'protocol-error',
+    });
+
+    const invalidUtf8Connection = new FakeConnection();
+    const invalidUtf8Client = new CodexAppServerClient({
+      executable: 'codex',
+      clientVersion: '0.1.0',
+      connectionFactory: () => invalidUtf8Connection,
+    });
+    const invalidUtf8Connect = invalidUtf8Client.connect();
+    invalidUtf8Connection.raw(
+      Uint8Array.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d, 0x0a]),
+    );
+    await expect(invalidUtf8Connect).rejects.toMatchObject({
       code: 'protocol-error',
     });
   });

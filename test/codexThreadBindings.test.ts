@@ -48,6 +48,7 @@ function pending(
     assignmentId: 'assignment-000001',
     roleProfileId: 'profile-000001',
     requestFingerprint: 'a'.repeat(64),
+    accessMode: 'workspace-write',
     startedAt: timestamp,
     ...overrides,
   };
@@ -65,7 +66,10 @@ function binding(
     taskId: 'task-000001',
     assignmentId: 'assignment-000001',
     roleProfileId: 'profile-000001',
+    requestFingerprint: 'a'.repeat(64),
+    accessMode: 'workspace-write',
     threadId: '019c-thread-000001',
+    initialTaskDispatchState: 'not-started',
     state: 'idle',
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -237,6 +241,27 @@ describe('CodexThreadBindingStore', () => {
     expect(await readFile(file, 'utf8')).toBe('{malformed');
   });
 
+  it('retains last-known-good state and blocks recreation after external deletion', async () => {
+    const userData = await temporaryRoot();
+    const store = new CodexThreadBindingStore(userData);
+    await store.load();
+    const journal = pending();
+    await store.beginStart(0, journal);
+    const file = path.join(userData, CODEX_THREAD_BINDINGS_FILENAME);
+    await rm(file);
+
+    const loaded = await store.reload();
+
+    expect(loaded.source).toBe('last-known-good');
+    expect(loaded.writeBlocked).toBe(true);
+    expect(loaded.problem?.code).toBe('read-failed');
+    expect(loaded.data.pendingStarts[journal.assignmentId]).toEqual(journal);
+    await expect(
+      store.clearPending(1, journal.assignmentId, journal.operationId),
+    ).rejects.toBeInstanceOf(CodexThreadBindingWriteBlockedError);
+    await expect(readFile(file, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('unblocks only after an authoritative external repair', async () => {
     const userData = await temporaryRoot();
     const file = path.join(userData, CODEX_THREAD_BINDINGS_FILENAME);
@@ -271,7 +296,7 @@ describe('CodexThreadBindingStore', () => {
     expect(store.getBinding('assignment-000001')).toBeUndefined();
   });
 
-  it('tracks only the exact active turn and clears it on completion', async () => {
+  it('journals the initial task before provider dispatch and retains its exact turn identity', async () => {
     const userData = await temporaryRoot();
     const store = new CodexThreadBindingStore(userData);
     await store.load();
@@ -279,23 +304,43 @@ describe('CodexThreadBindingStore', () => {
     await store.beginStart(0, journal);
     await store.commitStart(1, journal.operationId, binding());
 
-    const active = await store.updateTurn(
+    const pendingDispatch = await store.beginInitialTaskDispatch(
       2,
+      journal.assignmentId,
+    );
+    expect(pendingDispatch).toMatchObject({
+      initialTaskDispatchState: 'pending',
+      state: 'idle',
+    });
+
+    const restarted = new CodexThreadBindingStore(userData);
+    await restarted.load();
+    expect(restarted.getBinding(journal.assignmentId)).toMatchObject({
+      initialTaskDispatchState: 'pending',
+      state: 'idle',
+    });
+
+    const active = await restarted.updateTurn(
+      3,
       journal.assignmentId,
       '019c-turn-000001',
       'active',
     );
     expect(active).toMatchObject({
       activeTurnId: '019c-turn-000001',
+      initialTaskDispatchState: 'started',
+      initialTaskTurnId: '019c-turn-000001',
       state: 'active',
     });
-    const idle = await store.updateTurn(
-      3,
+    const idle = await restarted.updateTurn(
+      4,
       journal.assignmentId,
       undefined,
       'idle',
     );
     expect(idle.activeTurnId).toBeUndefined();
+    expect(idle.initialTaskDispatchState).toBe('started');
+    expect(idle.initialTaskTurnId).toBe('019c-turn-000001');
     expect(idle.state).toBe('idle');
   });
 });

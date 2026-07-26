@@ -1,7 +1,9 @@
 export { NodeGitPort, isFullGitObjectId } from './client.js';
 export { GitOperationError } from './contracts.js';
 export type {
+  CreateDetachedWorktreeRequest,
   CreateWriterWorktreeRequest,
+  FastForwardCheckoutRequest,
   GitCheckoutInspection,
   GitCommitIdentity,
   GitObjectFormat,
@@ -11,6 +13,7 @@ export type {
   GitProcessResult,
   GitRepositoryIdentity,
   GitWorktreeEntry,
+  PinCouncilHandoffRefRequest,
 } from './contracts.js';
 export {
   DEFAULT_GIT_OUTPUT_LIMIT_BYTES,

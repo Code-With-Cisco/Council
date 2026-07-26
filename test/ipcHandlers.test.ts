@@ -7,6 +7,10 @@ import {
   type IpcRegistrar,
 } from '../src/ui/ipcHandlers.js';
 import { IPC_CHANNELS, type UiResult } from '../src/ui/ipc.js';
+import type {
+  MissionUiController,
+  UiPreviewSquadInput,
+} from '../src/ui/missionUi.js';
 
 function success<T>(value: T): CliResult<T> {
   return { ok: true, value, raw: '', argv: [], durationMs: 0 };
@@ -34,6 +38,138 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     success({ id: 'council1', name: 'dc-council', unknownAgent: undefined }),
   );
   const confirmStartNew = vi.fn(async () => confirm);
+  const confirmStartSquad = vi.fn(async () => confirm);
+  const confirmMissionIntegration = vi.fn(async () => confirm);
+  const missionController: MissionUiController = {
+    getState: vi.fn(async () => ({
+      status: 'ready' as const,
+      workspaceId: 'workspace_123',
+      revision: 0,
+      problem: undefined,
+      providers: [],
+      gatePolicy: undefined,
+      projection: undefined,
+    })),
+    createMission: vi.fn(async () => ({
+      revision: 1,
+      mission: {
+        id: 'mission_123',
+        title: 'Mission',
+        objective: 'Objective',
+        phase: 'draft',
+        tasks: [],
+        latestCandidate: undefined,
+        testGate: undefined,
+        reviewGate: undefined,
+      },
+    })),
+    previewSquad: vi.fn(async (input: UiPreviewSquadInput) => ({
+      digest: 'd'.repeat(64),
+      missionId: input.missionId,
+      revision: input.expectedRevision,
+      repositoryHeadSha: 'a'.repeat(40),
+      participants: [],
+      gateAssignments: {
+        test: {
+          kind: 'test' as const,
+          taskId:
+            input.selections.find(
+              (selection) =>
+                selection.profileId ===
+                input.gateAssignments.testProfileId,
+            )?.taskId ?? 'task_test123',
+          profileId: input.gateAssignments.testProfileId,
+          executionIntent:
+            'allocate-read-only-on-start' as const,
+        },
+        review: {
+          kind: 'review' as const,
+          taskId:
+            input.selections.find(
+              (selection) =>
+                selection.profileId ===
+                input.gateAssignments.reviewProfileId,
+            )?.taskId ?? 'task_review123',
+          profileId: input.gateAssignments.reviewProfileId,
+          executionIntent:
+            'allocate-read-only-on-start' as const,
+        },
+      },
+      blockers: [],
+    })),
+    startSquad: vi.fn(async () => ({
+      missionId: 'mission_123',
+      revision: 2,
+      startedTaskIds: [],
+      failures: [],
+    })),
+    retryBlockedExecution: vi.fn(async (input) => ({
+      revision: input.expectedRevision + 1,
+      execution: {
+        id: input.executionId,
+        providerId: 'codex' as const,
+        state: 'running' as const,
+        accessMode: 'read-only' as const,
+        providerAction: 'resume' as const,
+        gateResponsibility: undefined,
+        definitionFingerprint: 'a'.repeat(64),
+      },
+    })),
+    recordHandoff: vi.fn(async (input) => ({
+      id: 'handoff_123',
+      taskId: input.taskId,
+      commitSha: input.claimedCommitSha,
+      treeSha: input.claimedTreeSha,
+      summary: input.summary,
+      createdAt: '2026-07-26T00:00:00.000Z',
+    })),
+    createCandidate: vi.fn(async (input) => ({
+      id: 'candidate_123',
+      state: 'ready' as const,
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      targetLabel: `current target for ${input.missionId}`,
+    })),
+    recordGate: vi.fn(async (input) => ({
+      id: 'gate_123',
+      candidateId: input.candidateId,
+      kind: input.kind,
+      status: 'passed' as const,
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      commandIds: [...input.commandIds],
+      gatePolicyFingerprint: input.gatePolicyFingerprint,
+      executorExecutionId: 'execution_gate123',
+      executorProfileId: input.executorProfileId,
+      evidence: ['privileged gate evidence'],
+      createdAt: '2026-07-26T00:00:00.000Z',
+    })),
+    previewIntegration: vi.fn(async (input) => ({
+      digest: 'e'.repeat(64),
+      approvalId: 'approval_123',
+      missionId: input.missionId,
+      candidateId: input.candidateId,
+      candidateCommitSha: 'a'.repeat(40),
+      candidateTreeSha: 'b'.repeat(40),
+      targetLabel: 'current workspace branch',
+      expectedTargetCommitSha: 'c'.repeat(40),
+      expectedTargetTreeSha: 'd'.repeat(40),
+      testGateId: 'gate_test',
+      reviewGateId: 'gate_review',
+      approvalRevision: input.expectedRevision,
+    })),
+    approveIntegration: vi.fn(async () => ({
+      missionId: 'mission_123',
+      revision: 3,
+      status: 'integrated' as const,
+      resultingCommitSha: 'f'.repeat(40),
+    })),
+    rejectIntegration: vi.fn(async () => ({
+      missionId: 'mission_123',
+      revision: 3,
+      status: 'rejected' as const,
+    })),
+  };
   const supervisor = {
     stopSession,
     logs,
@@ -55,8 +191,11 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     getState: () => undefined,
     chooseWorkspace: async () => ({ ok: false, message: 'not used' }),
     getSupervisor: () => supervisor,
+    getMissionController: () => missionController,
     canLaunchDefinitions: () => true,
     confirmStartNew,
+    confirmStartSquad,
+    confirmMissionIntegration,
     afterAction,
   };
   registerCouncilIpc(registrar, dependencies);
@@ -70,6 +209,9 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     startNewMember,
     startCouncilReview,
     confirmStartNew,
+    confirmStartSquad,
+    confirmMissionIntegration,
+    missionController,
   };
 }
 
@@ -156,8 +298,11 @@ describe('typed privileged IPC handlers', () => {
             startMember,
             startCouncilReview: council,
           }) as unknown as AgentSupervisorPort,
+        getMissionController: () => undefined,
         canLaunchDefinitions: () => false,
         confirmStartNew: async () => true,
+        confirmStartSquad: async () => true,
+        confirmMissionIntegration: async () => true,
         afterAction: async <T>(result: CliResult<T>) =>
           result.ok
             ? { ok: true, value: result.value }
@@ -250,5 +395,220 @@ describe('typed privileged IPC handlers', () => {
       });
     }
     expect(f.startCouncilReview).not.toHaveBeenCalled();
+  });
+
+  it('routes a valid squad preview through opaque IDs with an explicit provider per role', async () => {
+    const f = fixture();
+    const input = {
+      missionId: 'mission_123',
+      expectedRevision: 7,
+      selections: [
+        {
+          taskId: 'task_123',
+          profileId: 'profile-12345678',
+          providerId: 'codex',
+          expectedDefinitionFingerprint: 'a'.repeat(64),
+          writeCapable: true,
+        },
+        {
+          taskId: 'task_test123',
+          profileId: 'profile-test0001',
+          providerId: 'claude-code',
+          expectedDefinitionFingerprint: 'b'.repeat(64),
+          writeCapable: false,
+        },
+        {
+          taskId: 'task_review123',
+          profileId: 'profile-review01',
+          providerId: 'codex',
+          expectedDefinitionFingerprint: 'c'.repeat(64),
+          writeCapable: false,
+        },
+      ],
+      gateAssignments: {
+        testProfileId: 'profile-test0001',
+        reviewProfileId: 'profile-review01',
+      },
+    } as const;
+    const result = await f.invoke(IPC_CHANNELS.previewSquad, input);
+    expect(result).toMatchObject({ ok: true });
+    expect(f.missionController.previewSquad).toHaveBeenCalledExactlyOnceWith(
+      input,
+    );
+  });
+
+  it('rejects raw mission launch authority before the controller boundary', async () => {
+    const f = fixture();
+    const result = await f.invoke(IPC_CHANNELS.previewSquad, {
+      missionId: 'mission_123',
+      expectedRevision: 7,
+      selections: [
+        {
+          taskId: 'task_123',
+          profileId: 'profile-12345678',
+          providerId: 'codex',
+          expectedDefinitionFingerprint: 'a'.repeat(64),
+          writeCapable: true,
+          cwd: '/tmp/untrusted',
+          argv: ['--untrusted'],
+        },
+        {
+          taskId: 'task_test123',
+          profileId: 'profile-test0001',
+          providerId: 'claude-code',
+          expectedDefinitionFingerprint: 'b'.repeat(64),
+          writeCapable: false,
+        },
+        {
+          taskId: 'task_review123',
+          profileId: 'profile-review01',
+          providerId: 'codex',
+          expectedDefinitionFingerprint: 'c'.repeat(64),
+          writeCapable: false,
+        },
+      ],
+      gateAssignments: {
+        testProfileId: 'profile-test0001',
+        reviewProfileId: 'profile-review01',
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      message: 'Invalid opaque squad preview request.',
+    });
+    expect(f.missionController.previewSquad).not.toHaveBeenCalled();
+  });
+
+  it('retries only an opaque blocked execution identity at an exact revision', async () => {
+    const f = fixture();
+    const input = {
+      expectedRevision: 8,
+      executionId: 'execution_123',
+    };
+    const result = await f.invoke(
+      IPC_CHANNELS.retryMissionExecution,
+      input,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        revision: 9,
+        execution: {
+          id: 'execution_123',
+          providerId: 'codex',
+          state: 'running',
+        },
+      },
+    });
+    expect(
+      f.missionController.retryBlockedExecution,
+    ).toHaveBeenCalledExactlyOnceWith(input);
+  });
+
+  it('rejects renderer-supplied provider or path authority for Mission retries', async () => {
+    const f = fixture();
+    for (const extra of [
+      { providerId: 'codex' },
+      { cwd: '/tmp/untrusted' },
+      { argv: ['--dangerous'] },
+    ]) {
+      const result = await f.invoke(IPC_CHANNELS.retryMissionExecution, {
+        expectedRevision: 8,
+        executionId: 'execution_123',
+        ...extra,
+      });
+      expect(result).toEqual({
+        ok: false,
+        message: 'Invalid blocked Mission execution retry.',
+      });
+    }
+    expect(
+      f.missionController.retryBlockedExecution,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('routes handoff, candidate, and gate plans without raw Git mutation authority', async () => {
+    const f = fixture();
+    const handoff = {
+      expectedRevision: 8,
+      taskId: 'task_123',
+      executionId: 'execution_123',
+      claimedCommitSha: 'a'.repeat(40),
+      claimedTreeSha: 'b'.repeat(40),
+      summary: 'Ready for gates.',
+      evidence: ['tests passed'],
+      risks: [],
+    };
+    const candidate = {
+      expectedRevision: 9,
+      missionId: 'mission_123',
+      orderedHandoffIds: ['handoff_123'],
+    };
+    const gate = {
+      expectedRevision: 10,
+      candidateId: 'candidate_123',
+      kind: 'test',
+      commandIds: ['typecheck'],
+      gatePolicyFingerprint: 'c'.repeat(64),
+      executorProfileId: 'profile-12345678',
+    } as const;
+    await f.invoke(IPC_CHANNELS.recordHandoff, handoff);
+    await f.invoke(IPC_CHANNELS.createCandidate, candidate);
+    await f.invoke(IPC_CHANNELS.recordGate, gate);
+    expect(f.missionController.recordHandoff).toHaveBeenCalledWith(handoff);
+    expect(f.missionController.createCandidate).toHaveBeenCalledWith(candidate);
+    expect(f.missionController.recordGate).toHaveBeenCalledWith(gate);
+  });
+
+  it('prevents the renderer from supplying a gate verdict, object IDs, or evidence', async () => {
+    const f = fixture();
+    const result = await f.invoke(IPC_CHANNELS.recordGate, {
+      expectedRevision: 10,
+      candidateId: 'candidate_123',
+      kind: 'review',
+      commandIds: [],
+      gatePolicyFingerprint: 'c'.repeat(64),
+      executorProfileId: 'profile-12345678',
+      status: 'passed',
+      commitSha: 'a'.repeat(40),
+      treeSha: 'b'.repeat(40),
+      evidence: ['self-certified'],
+    });
+    expect(result).toEqual({
+      ok: false,
+      message: 'Invalid bounded gate request.',
+    });
+    expect(f.missionController.recordGate).not.toHaveBeenCalled();
+  });
+
+  it('requires confirmation and a single-use digest for Start Squad and integration approval', async () => {
+    const canceled = fixture(true, false);
+    expect(
+      await canceled.invoke(IPC_CHANNELS.startSquad, 'd'.repeat(64)),
+    ).toEqual({ ok: false, message: 'Start Squad was canceled.' });
+    expect(canceled.missionController.startSquad).not.toHaveBeenCalled();
+
+    const confirmed = fixture();
+    await confirmed.invoke(IPC_CHANNELS.startSquad, 'd'.repeat(64));
+    expect(confirmed.confirmStartSquad).toHaveBeenCalledOnce();
+    expect(
+      confirmed.missionController.startSquad,
+    ).toHaveBeenCalledExactlyOnceWith('d'.repeat(64));
+
+    await confirmed.invoke(
+      IPC_CHANNELS.approveIntegration,
+      'e'.repeat(64),
+    );
+    expect(confirmed.confirmMissionIntegration).toHaveBeenCalledOnce();
+    expect(
+      confirmed.missionController.approveIntegration,
+    ).toHaveBeenCalledExactlyOnceWith('e'.repeat(64));
+  });
+
+  it('rejects untrusted Mission requests before controller access', async () => {
+    const f = fixture(false);
+    const result = await f.invoke(IPC_CHANNELS.getMissionState);
+    expect(result).toEqual({ ok: false, message: 'Untrusted IPC sender.' });
+    expect(f.missionController.getState).not.toHaveBeenCalled();
   });
 });

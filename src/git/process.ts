@@ -61,6 +61,9 @@ export function runGitProcess(
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
   const maxOutputBytes =
     options.maxOutputBytes ?? DEFAULT_GIT_OUTPUT_LIMIT_BYTES;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new TypeError('Git timeout must be a positive safe integer.');
+  }
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1) {
     throw new TypeError('Git output limit must be a positive safe integer.');
   }
@@ -209,9 +212,7 @@ export function runGitProcess(
         options.signal.addEventListener('abort', onAbort, { once: true });
       }
     }
-    if (timeoutMs > 0) {
-      timer = setTimeout(() => terminate('timeout'), timeoutMs);
-      timer.unref();
-    }
+    timer = setTimeout(() => terminate('timeout'), timeoutMs);
+    timer.unref();
   });
 }

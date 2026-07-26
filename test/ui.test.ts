@@ -29,6 +29,10 @@ describe('Windows Electron shell', () => {
       path.join(REPO_ROOT, 'src', 'ui', 'ipcHandlers.ts'),
       'utf8',
     );
+    const missionUi = await readFile(
+      path.join(REPO_ROOT, 'src', 'ui', 'missionUi.ts'),
+      'utf8',
+    );
     expect(main).toContain("process.platform !== 'win32'");
     expect(main).toContain('frame: true');
     expect(main).toContain('contextIsolation: true');
@@ -41,6 +45,7 @@ describe('Windows Electron shell', () => {
     expect(main).toContain('acquireSingleInstance');
     expect(main).toContain("properties: ['openDirectory']");
     expect(main).toContain('registerCouncilIpc');
+    expect(main).toContain('MissionUiController');
     expect(main).toContain('profileLoadProblem(savedRoster)');
     expect(main).toContain('profileLoadProblem(loaded)');
     expect(ipcHandlers).toContain('validateProfileId');
@@ -50,6 +55,11 @@ describe('Windows Electron shell', () => {
     expect(ipc).not.toContain('readonly executable');
     expect(ipc).not.toContain('hookConfig');
     expect(ipc).not.toContain('readonly interpreter');
+    expect(missionUi).toContain('readonly providerId: UiMissionProviderId');
+    expect(missionUi).not.toContain('readonly argv');
+    expect(missionUi).not.toContain('readonly executable');
+    expect(missionUi).not.toContain('readonly canonicalPath');
+    expect(missionUi).not.toContain('readonly providerResourceId');
   });
 
   it('keeps preload channel names synchronized with the typed contract', async () => {
@@ -63,6 +73,14 @@ describe('Windows Electron shell', () => {
     expect(preload).toContain(
       'startNewMember: (profileId, expectedDefinitionFingerprint)',
     );
+    expect(preload).toContain('getMissionState: ()');
+    expect(preload).toContain('previewSquad: (input)');
+    expect(preload).toContain('startSquad: (previewDigest)');
+    expect(preload).toContain('retryMissionExecution: (input)');
+    expect(preload).toContain('recordHandoff: (input)');
+    expect(preload).toContain('createCandidate: (input)');
+    expect(preload).toContain('recordGate: (input)');
+    expect(preload).toContain('approveIntegration: (previewDigest)');
   });
 
   it('ships a restrictive renderer content security policy', async () => {
@@ -98,6 +116,13 @@ describe('Windows Electron shell', () => {
     expect(html).toContain('src="./pixel-office.js"');
     expect(html).toContain('src="./scene-view-model.js"');
     expect(html).toContain('id="council-session"');
+    expect(html).toContain('id="view-missions"');
+    expect(html).toContain('id="mission-role-options"');
+    expect(html).toContain('id="squad-preview"');
+    expect(html).toContain('id="integration-preview"');
+    expect(html).toContain('id="handoff-form"');
+    expect(html).toContain('id="gate-form"');
+    expect(html).toContain('src="./mission-view-model.js"');
     expect(html).not.toContain('support.js');
     expect(html).not.toContain('fonts.googleapis.com');
     expect(renderer).toContain('AGENTS_PER_OFFICE = 5');
@@ -105,6 +130,15 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('profileActions.stop(slot.member.key)');
     expect(renderer).toContain('profileActions.resume(slot.member.key)');
     expect(renderer).toContain('CouncilSceneViewModel.findCouncilSlot');
+    expect(renderer).toContain('providerId: choice.providerId');
+    expect(renderer).toContain('assignmentBadge(slot.member.key)');
+    expect(renderer).toContain('api.startSquad(preview.digest)');
+    expect(renderer).toContain('api.retryMissionExecution({');
+    expect(renderer).toContain('Retry exact assignment');
+    expect(renderer).toContain('api.recordHandoff({');
+    expect(renderer).toContain('api.createCandidate({');
+    expect(renderer).toContain('api.recordGate({');
+    expect(renderer).toContain('api.approveIntegration(preview.digest)');
     expect(renderer).toContain('councilSlot?.validation?.fingerprint');
     expect(
       renderer.match(
@@ -117,6 +151,7 @@ describe('Windows Electron shell', () => {
     expect(renderer).not.toContain('bram:');
     expect(pixelOffice).toContain("type: 'agent'");
     expect(pixelOffice).toContain("type: 'room'");
+    expect(pixelOffice).toContain('agent?.missionBadge');
     expect(pixelOffice).not.toContain('new Function');
     expect(pixelOffice).not.toContain('fetch(');
   });

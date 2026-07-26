@@ -65,6 +65,28 @@ export interface CreateWriterWorktreeRequest {
   readonly baseCommit: string;
 }
 
+export interface CreateDetachedWorktreeRequest {
+  readonly repository: GitRepositoryIdentity;
+  readonly checkoutPath: string;
+  readonly commit: string;
+}
+
+export interface PinCouncilHandoffRefRequest {
+  readonly repositoryRoot: string;
+  readonly objectFormat: GitObjectFormat;
+  readonly ref: string;
+  readonly commit: string;
+}
+
+export interface FastForwardCheckoutRequest {
+  readonly checkoutPath: string;
+  readonly branchRef: string;
+  readonly expectedCommit: string;
+  readonly expectedTree: string;
+  readonly nextCommit: string;
+  readonly nextTree: string;
+}
+
 /**
  * Semantic Git authority used by orchestration.
  *
@@ -83,6 +105,11 @@ export interface GitPort {
   listWorktrees(repositoryRoot: string): Promise<readonly GitWorktreeEntry[]>;
   createWriterWorktree(request: CreateWriterWorktreeRequest): Promise<void>;
   createExistingBranchWorktree(request: CreateWriterWorktreeRequest): Promise<void>;
+  createDetachedWorktree(request: CreateDetachedWorktreeRequest): Promise<void>;
+  pinCouncilHandoffRef(request: PinCouncilHandoffRefRequest): Promise<void>;
+  fastForwardCheckout(
+    request: FastForwardCheckoutRequest,
+  ): Promise<GitCheckoutInspection>;
   removeWorktree(repositoryRoot: string, checkoutPath: string): Promise<void>;
   isAncestor(
     repositoryRoot: string,

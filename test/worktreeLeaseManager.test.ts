@@ -4,12 +4,15 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
+  CreateDetachedWorktreeRequest,
   CreateWriterWorktreeRequest,
+  FastForwardCheckoutRequest,
   GitCheckoutInspection,
   GitCommitIdentity,
   GitPort,
   GitRepositoryIdentity,
   GitWorktreeEntry,
+  PinCouncilHandoffRefRequest,
 } from '../src/git/contracts.js';
 import {
   WorktreeLeaseManager,
@@ -30,6 +33,7 @@ class FakeGit implements GitPort {
   createCalls = 0;
   onCreate: (() => Promise<void>) | undefined;
   failAfterCreate = false;
+  failRemoveBeforeMutation = false;
 
   constructor(readonly repository: GitRepositoryIdentity) {}
 
@@ -91,11 +95,30 @@ class FakeGit implements GitPort {
     await this.create(request);
   }
 
+  async createDetachedWorktree(
+    _request: CreateDetachedWorktreeRequest,
+  ): Promise<void> {
+    throw new Error('not used by lease-manager tests');
+  }
+
+  async pinCouncilHandoffRef(
+    _request: PinCouncilHandoffRefRequest,
+  ): Promise<void> {
+    throw new Error('not used by lease-manager tests');
+  }
+
+  async fastForwardCheckout(
+    _request: FastForwardCheckoutRequest,
+  ): Promise<GitCheckoutInspection> {
+    throw new Error('not used by lease-manager tests');
+  }
+
   async removeWorktree(
     _repositoryRoot: string,
     checkoutPath: string,
   ): Promise<void> {
     this.removeCalls.push(checkoutPath);
+    if (this.failRemoveBeforeMutation) throw new Error('worktree is locked');
     this.worktrees.delete(checkoutPath);
     await rm(checkoutPath, { recursive: true });
   }
@@ -299,5 +322,28 @@ describe('WorktreeLeaseManager', () => {
     await expect(manager.reconcile(active.leaseId)).rejects.toThrow(
       /shutting down/,
     );
+  });
+
+  it('retains a cleanup journal and safely retries only the exact clean target', async () => {
+    const { store, git, manager } = await fixture();
+    const active = await manager.provisionWriter(request());
+    const retained = await manager.retain(active.leaseId, HEAD);
+    git.failRemoveBeforeMutation = true;
+
+    await expect(manager.cleanup(retained.leaseId, HEAD)).rejects.toThrow(
+      /journal remains/,
+    );
+    expect(store.getLease(retained.leaseId)?.state).toBe('cleanup-pending');
+    expect(Object.values(store.state.data.pendingOperations)[0]?.kind).toBe(
+      'cleanup',
+    );
+
+    git.failRemoveBeforeMutation = false;
+    const removed = await manager.cleanup(retained.leaseId, HEAD);
+    expect(removed.state).toBe('removed');
+    expect(git.removeCalls).toEqual([
+      retained.checkoutPath,
+      retained.checkoutPath,
+    ]);
   });
 });

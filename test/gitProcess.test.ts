@@ -50,7 +50,7 @@ describe('bounded Git process boundary', () => {
     const result = await runGitProcess(
       'C:\\Program Files\\Git\\bin\\git.exe',
       ['worktree', 'remove', checkout],
-      { cwd: '/Council repo', timeoutMs: 0 },
+      { cwd: '/Council repo', timeoutMs: 10_000 },
     );
 
     expect(result.ok).toBe(true);
@@ -79,7 +79,7 @@ describe('bounded Git process boundary', () => {
 
     const result = await runGitProcess('git', ['status'], {
       cwd: '/work/repo',
-      timeoutMs: 0,
+      timeoutMs: 10_000,
       maxOutputBytes: 5,
     });
 

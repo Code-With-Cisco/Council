@@ -28,6 +28,13 @@ This is implementation evidence only:
 | Resolved agent catalog and watcher replacement | implemented-unverified | Precedence, ambiguity, fingerprint, diagnostics, and add/edit/remove tests pass on macOS; verify Windows filesystem events |
 | Exact session bindings and crash journal | implemented-unverified | Persistence, last-known-good, exact-ID roster, pending recovery, and atomic-failure tests pass; verify real Claude restart behavior on Windows |
 | Serialized safe launch and lifecycle | implemented-unverified | Concurrency, substitution cleanup, timeout recovery, CAS replacement, shutdown, and authorization tests pass with fakes; exercise real CLI behavior on Windows |
+| Provider-neutral Mission authority | implemented-unverified | Strict Mission transitions, stale previews, partial-start recovery, exact assignments, and mixed-provider routing are covered on macOS; execute a mixed Claude/Codex Mission on Windows |
+| Codex App Server stdio transport | implemented-unverified | Unit tests cover initialization, authentication state, malformed/oversized messages, request correlation, approvals, process exit, exact resume, and shutdown; a real authenticated macOS handshake passed, which is not Windows evidence |
+| Codex persistent role threads | implemented-unverified | Exact binding, contract fingerprint, access mode, initial-turn journal, resume, interruption, and shutdown-race tests pass; verify provider-owned sign-in and restart behavior with the Windows Codex executable |
+| Council-owned writer worktrees | implemented-unverified | Real-Git tests cover generated refs, exact base commit/tree, collision rejection, dirty retention, crash reconciliation, and no shutdown deletion; repeat against Git for Windows, NTFS, and a path containing spaces |
+| Detached Test and Review gates | implemented-unverified | Policy-only argv, minimal environment, exact detached commit/tree, bounded hashed evidence, independent assignments, and cleanup recovery are tested; run with PowerShell and Windows process termination semantics |
+| Approved fast-forward integration | implemented-unverified | Real-Git and adversarial tests cover exact preview approval, target drift, expected-old ref update, checkout synchronization, and approved-journal recovery; repeat on the packaged Windows runtime |
+| Typed Missions UI and shared projections | implemented-unverified | Start Squad, exact handoff, gate, retry, and integration surfaces are covered by controller/IPC/view-model tests; inspect keyboard use, scaling, native confirmations, and provider diagnostics on Windows |
 | Sandboxed typed IPC | implemented-unverified | Sender, opaque-ID, type/size/control-byte tests pass; renderer state excludes executable paths and generic process authority |
 | TypeScript integration module | implemented-unverified | Typechecks and platform-neutral unit tests pass on macOS; run the full suite on Windows |
 | Electron squad and detail UI | implemented-unverified | Static architecture and IPC tests pass; launch and scaling require Windows |
@@ -68,6 +75,24 @@ Before calling a build Windows-verified:
 10. Run `guard-self-test.ps1` through application launch preflight.
 11. Test both optional `node-pty` present and absent in the packaged Electron ABI.
 12. Inspect the UI at 100%, 125%, 150%, and 200% Windows display scaling.
+13. Connect to the Windows Codex App Server, confirm provider-owned
+    authentication status, then close Council and verify no thread is deleted
+    or archived.
+14. Start a mixed Claude/Codex Mission with distinct read-only Test and Review
+    assignments and at least one writer worktree under a user-data path
+    containing spaces.
+15. Restart once during writer provisioning and once after a Codex thread is
+    saved but before its first turn is acknowledged; confirm Council offers
+    only the exact durable retry and creates no duplicate worktree or turn.
+16. Record an exact clean-commit handoff, run both detached gates, move the
+    target branch after preview, and confirm the old integration fingerprint is
+    rejected without mutation.
+17. Repeat integration without drift, approve the exact preview, interrupt the
+    app after the expected-old ref update, and confirm restart recovery leaves
+    the selected branch and checkout at the one reviewed commit.
+18. Quit while a Mission operation and gate command are active; verify Council
+    stops only its own processes, drains or blocks durable writes, and
+    preserves provider conversations and worktrees.
 
 Record the Windows version, architecture, Claude Code version, PowerShell
 executable/version, Node version, test date, and evidence for each completed
