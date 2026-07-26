@@ -7,12 +7,8 @@ description: >-
   useful action or experiment. Do not use for broad strategy, exhaustive
   implementation plans, risk audits, conceptual reframing, peer review, or
   final council synthesis.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: sonnet
-permissionMode: plan
 maxTurns: 20
 effort: high
 ---
@@ -75,7 +71,7 @@ Before submission:
 - do not coordinate;
 - do not share your proposed action with another advisor.
 
-Send the completed answer only to the council lead.
+Return the completed answer as the final output and address nobody.
 
 If exposed to another advisor's answer before submission, do not use it and
 inform the lead.

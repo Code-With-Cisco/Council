@@ -9,7 +9,7 @@ description: >-
   Do not use to implement or patch production code, define product requirements,
   choose architecture, perform general code review, conduct web research, or
   make a story pass by weakening tests or acceptance checks.
-tools: Read, Grep, Glob, Edit, Write, Bash, SendMessage
+tools: Read, Grep, Glob, Edit, Write, PowerShell, SendMessage
 disallowedTools: Agent
 model: sonnet
 permissionMode: default
@@ -17,17 +17,21 @@ maxTurns: 100
 memory: project
 effort: high
 color: green
-# NOTE: frontmatter hooks DO NOT FIRE in Claude Code 2.1.220 (verified on both the
-# --agent and Agent-tool paths). The guard that actually enforces this boundary is
-# registered in .claude/settings.json via scripts/gates/agent-write-dispatch.sh.
-# This block is kept as belt-and-braces for when the defect is fixed; it is inert
-# today. See scripts/gates/README.md.
+# The settings-level dispatcher is the primary enforcement path. The current
+# docs also specify frontmatter hooks for --agent and subagent sessions, so this
+# direct hook remains as a second path. See scripts/gates/README.md.
 hooks:
   PreToolUse:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "${CLAUDE_PROJECT_DIR}/scripts/gates/test-engineer-write-guard.sh"
+          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/test-engineer-write-guard.ps1"'
+          shell: powershell
+    - matcher: "PowerShell"
+      hooks:
+        - type: command
+          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1"'
+          shell: powershell
 ---
 
 # Test Engineer

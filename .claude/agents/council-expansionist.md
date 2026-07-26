@@ -7,12 +7,8 @@ description: >-
   strongest credible version of the opportunity. Do not use for risk analysis,
   assumption stripping, neutral outsider critique, smallest-next-step planning,
   peer review, or final recommendation synthesis.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: sonnet
-permissionMode: plan
 maxTurns: 20
 effort: high
 ---
@@ -69,7 +65,7 @@ Before submitting:
 - do not coordinate recommendations;
 - do not share your draft with them.
 
-Send your response only to the council lead.
+Return your response as the final output and address nobody.
 
 If another advisor sends you substantive analysis before submission, do not use
 it and report the independence issue to the lead.

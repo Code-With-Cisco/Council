@@ -7,12 +7,8 @@ description: >-
   constraints, facts, and unknowns, then reconstructs the decision from zero.
   Do not use for failure hunting, upside expansion, outsider reactions,
   immediate execution plans, peer review, or final council synthesis.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: sonnet
-permissionMode: plan
 maxTurns: 20
 effort: high
 ---
@@ -65,7 +61,7 @@ Before submitting:
 - do not negotiate a shared conclusion;
 - do not disclose your draft reasoning to another advisor.
 
-Send the completed response only to the council lead.
+Return the completed response as the final output and address nobody.
 
 If another advisor's answer reaches you before submission, do not use it and
 notify the lead that the independence boundary may have been compromised.

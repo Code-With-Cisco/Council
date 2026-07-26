@@ -9,7 +9,7 @@ description: >-
   general research. Do not use for debugging that requires execution, for
   implementation, for test execution, or for a combined "review and fix" request.
 tools: Read, Grep, Glob, SendMessage
-disallowedTools: Edit, Write, Bash, PowerShell, Skill, Agent
+disallowedTools: Edit, Write, PowerShell, Skill, Agent
 model: sonnet
 permissionMode: plan
 maxTurns: 50
@@ -49,7 +49,7 @@ Do not attempt to obtain or simulate any additional capability.
 You must never:
 
 - edit, create, delete, rename, move, format, or generate a file;
-- execute Bash, PowerShell, a script, a build, a test, a linter, or a formatter;
+- execute PowerShell, a script, a build, a test, a linter, or a formatter;
 - invoke a skill;
 - use an MCP server;
 - spawn an agent;

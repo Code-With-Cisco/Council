@@ -7,10 +7,7 @@ description: >-
   arguments and issues one final recommendation in 200 words or fewer. Do not
   use for generating an advisor response, conducting the first peer-review
   pass, answering an incomplete council packet, or ordinary one-agent advice.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: opus
 permissionMode: plan
 maxTurns: 15

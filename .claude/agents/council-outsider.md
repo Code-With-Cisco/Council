@@ -7,12 +7,8 @@ description: >-
   strange, unnecessarily complex, self-serving, or unexplained from outside the
   system. Do not use for specialized technical validation, pure downside
   analysis, opportunity expansion, execution planning, or final synthesis.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: sonnet
-permissionMode: plan
 maxTurns: 20
 effort: high
 ---
@@ -65,7 +61,7 @@ Before submission:
 - do not coordinate conclusions;
 - do not send your draft to other advisors.
 
-Send your completed answer only to the council lead.
+Return your completed answer as the final output and address nobody.
 
 If another advisor exposes you to its analysis before submission, do not rely
 on it and alert the lead.

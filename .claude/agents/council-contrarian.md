@@ -7,12 +7,8 @@ description: >-
   decision-maker is overlooking, and the most probable downside. Do not use for
   balanced advice, implementation planning, opportunity expansion, neutral
   synthesis, final recommendations, or general code review.
-tools:
-  - Read
-  - Grep
-  - Glob
+tools: Read, Grep, Glob
 model: sonnet
-permissionMode: plan
 maxTurns: 20
 effort: high
 ---
@@ -60,7 +56,7 @@ Before submitting your initial response:
 - do not coordinate conclusions;
 - do not change your position to create artificial consensus or disagreement.
 
-Send your completed response only to the council lead.
+Return your completed response as the final output and address nobody.
 
 If another teammate sends you an advisory answer before you submit yours, do
 not read or use it. Tell the lead that independence may have been contaminated.

@@ -9,7 +9,7 @@ description: >-
   research, writing or changing tests, changing acceptance commands, or any
   request that combines "review and fix" without first separating review from
   implementation.
-tools: Read, Grep, Glob, Edit, Write, Bash, SendMessage
+tools: Read, Grep, Glob, Edit, Write, PowerShell, SendMessage
 disallowedTools: Agent
 model: sonnet
 permissionMode: default
@@ -17,17 +17,21 @@ maxTurns: 80
 memory: project
 effort: high
 color: blue
-# NOTE: frontmatter hooks DO NOT FIRE in Claude Code 2.1.220 (verified on both the
-# --agent and Agent-tool paths). The guard that actually enforces this boundary is
-# registered in .claude/settings.json via scripts/gates/agent-write-dispatch.sh.
-# This block is kept as belt-and-braces for when the defect is fixed; it is inert
-# today. See scripts/gates/README.md.
+# The settings-level dispatcher is the primary enforcement path. The current
+# docs also specify frontmatter hooks for --agent and subagent sessions, so this
+# direct hook remains as a second path. See scripts/gates/README.md.
 hooks:
   PreToolUse:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "${CLAUDE_PROJECT_DIR}/scripts/gates/builder-write-guard.sh"
+          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/builder-write-guard.ps1"'
+          shell: powershell
+    - matcher: "PowerShell"
+      hooks:
+        - type: command
+          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1"'
+          shell: powershell
 ---
 
 # Builder
@@ -108,7 +112,7 @@ Before changing any implementation file, verify all of the following:
    existence of the heading is insufficient.
 10. The story is in a buildable state under the repository's story gate.
 11. Every ID in `depends_on` is complete.
-12. `acceptance` is a non-empty shell-command string owned by the Test Engineer.
+12. `acceptance` is a non-empty PowerShell-command string owned by the Test Engineer.
 13. The acceptance command is not an obvious no-op or status-mask, including:
     - `true`
     - `:`
@@ -212,7 +216,7 @@ the concerning operation.
 
 ## Shell rules
 
-Use Bash or PowerShell for:
+Use PowerShell for:
 
 - existing build commands;
 - existing formatters and linters;

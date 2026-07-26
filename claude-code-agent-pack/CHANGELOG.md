@@ -1,5 +1,14 @@
 # Change Log
 
+## 2026-07-26 — Windows-only enforcement conversion
+
+- Replaced the Bash write dispatcher and role guards with PowerShell implementations.
+- Added a PowerShell shell-operation guard and Windows-only story gate.
+- Registered `Edit|Write`, `PowerShell`, `TaskCompleted`, and `TeammateIdle` handlers in
+  `.claude/settings.json`.
+- Added the Windows guard self-test and verification ledger.
+- The earlier macOS-specific choices below are historical and are superseded by this entry.
+
 ## 2026-07-25 — Frontmatter, routing, and runtime-gate pass
 
 Verified every field against the current `sub-agents` and `agent-teams`
