@@ -1,5 +1,65 @@
 # Change Log
 
+## 2026-07-25 — Frontmatter, routing, and runtime-gate pass
+
+Verified every field against the current `sub-agents` and `agent-teams`
+documentation. Agent prompt bodies were not reworded.
+
+Frontmatter, all four agents:
+
+- Converted `tools` from a YAML block sequence to the documented comma-separated
+  string form. (`skills` remains a block sequence — that *is* its documented
+  form; the two fields differ.)
+- Added `SendMessage`, without which the inter-agent notification protocol the
+  bodies describe cannot execute on the plain subagent path.
+- Removed `PowerShell` from Builder and Test Engineer; the host is macOS.
+- Added `disallowedTools` as defense in depth, and `color` so the four are
+  distinguishable in the task panel.
+- Deliberately did **not** add `memory` to Reviewer: memory auto-enables Read,
+  Write, and Edit, which would silently break its read-only guarantee.
+- Left `model`, `permissionMode`, `maxTurns`, `effort`, and `skills` unchanged.
+
+Routing:
+
+- Deleted the `SHOULD route:` / `SHOULD NOT route:` trailer lines from all four
+  bodies. Delegation reads `description`, not the body, so those lines affected
+  nothing. Each signal was confirmed already covered by the existing
+  `description` before removal; none was lost.
+- Relocated each `WATCH:` line to sit under the agent's opening role statement,
+  reformatted as "Known failure mode: …" with its meaning preserved.
+
+Runtime gates — the part that actually enforces anything:
+
+- Added `scripts/gates/builder-write-guard.sh`,
+  `test-engineer-write-guard.sh`, and `prd-lead-write-guard.sh`, plus the shared
+  `_guard-lib.sh`. Wired to `PreToolUse` / `Edit|Write` in each agent's
+  frontmatter. Reviewer gets no hook: it has no write tools.
+- Guards exit 2 to block with a reason on stderr, exit 0 to allow, and fail
+  closed on an unparseable payload, a missing `file_path`, or `..` traversal.
+- Hook commands use `${CLAUDE_PROJECT_DIR}`, not a relative path, which would
+  resolve against the agent's cwd and break inside a worktree.
+- Guards strip a `.claude/worktrees/<name>/` prefix before matching. Without
+  that, every pattern stops matching precisely when a background session is
+  doing real work.
+- Path-level only. The rule that Test Engineer may edit *only* a story's
+  `acceptance` field — and that PRD Lead may never touch it — is not enforceable
+  at the path level and remains prompt-level. Documented in each script and in
+  `scripts/gates/README.md`.
+
+Install location and docs:
+
+- Agents now install to project scope `.claude/agents/`, not `~/.claude/agents/`.
+  They encode project-specific conventions and reference project-relative gate
+  scripts, so they belong in version control. A restart is required the first
+  time, because the file watcher only covers directories that existed at session
+  start.
+- Recorded a "Known constraints" section covering `AskUserQuestion` being
+  unavailable to subagents, `skills`/`mcpServers` being ignored for teammates,
+  `permissionMode` being overridden by the parent, and `permissionMode`/`hooks`/
+  `mcpServers` being ignored for plugin subagents.
+- Deleted `MANIFEST.md`; its hardcoded byte counts were already stale.
+- Updated the four per-agent READMEs, which still pointed at `~/.claude/agents/`.
+
 ## PRD change-propagation revision
 
 The PRD Lead now:
