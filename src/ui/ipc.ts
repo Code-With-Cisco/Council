@@ -4,6 +4,25 @@ import type { Snapshot } from '../integration/runtime.js';
 import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
 import type { ResolvedAgentCatalog } from '../supervisor/catalog.js';
 import type { SessionBindingStoreProblem } from '../supervisor/sessionBindings.js';
+import type {
+  UiCreateMissionInput,
+  UiCreateMissionResult,
+  UiIntegrationPreview,
+  UiIntegrationResult,
+  UiMissionState,
+  UiRecordGateInput,
+  UiRecordHandoffInput,
+  UiRetryMissionExecutionInput,
+  UiRetryMissionExecutionResult,
+  UiCreateCandidateInput,
+  UiMissionCandidate,
+  UiMissionGate,
+  UiMissionHandoff,
+  UiPreviewIntegrationInput,
+  UiPreviewSquadInput,
+  UiSquadStartPreview,
+  UiSquadStartResult,
+} from './missionUi.js';
 
 export const IPC_CHANNELS = {
   getState: 'dc:get-state',
@@ -17,6 +36,18 @@ export const IPC_CHANNELS = {
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
+  getMissionState: 'dc:mission:get-state',
+  createMission: 'dc:mission:create',
+  previewSquad: 'dc:mission:preview-squad',
+  startSquad: 'dc:mission:start-squad',
+  retryMissionExecution: 'dc:mission:retry-execution',
+  recordHandoff: 'dc:mission:record-handoff',
+  createCandidate: 'dc:mission:create-candidate',
+  recordGate: 'dc:mission:record-gate',
+  previewIntegration: 'dc:mission:preview-integration',
+  approveIntegration: 'dc:mission:approve-integration',
+  rejectIntegration: 'dc:mission:reject-integration',
+  missionState: 'dc:mission:state',
   snapshot: 'dc:snapshot',
   state: 'dc:state',
 } as const;
@@ -107,6 +138,34 @@ export interface DecagramCouncilApi {
     question: string,
     expectedDefinitionFingerprint: string,
   ): Promise<UiResult<StartSessionOutcome>>;
+  getMissionState(): Promise<UiResult<UiMissionState>>;
+  createMission(
+    input: UiCreateMissionInput,
+  ): Promise<UiResult<UiCreateMissionResult>>;
+  previewSquad(
+    input: UiPreviewSquadInput,
+  ): Promise<UiResult<UiSquadStartPreview>>;
+  startSquad(previewDigest: string): Promise<UiResult<UiSquadStartResult>>;
+  retryMissionExecution(
+    input: UiRetryMissionExecutionInput,
+  ): Promise<UiResult<UiRetryMissionExecutionResult>>;
+  recordHandoff(
+    input: UiRecordHandoffInput,
+  ): Promise<UiResult<UiMissionHandoff>>;
+  createCandidate(
+    input: UiCreateCandidateInput,
+  ): Promise<UiResult<UiMissionCandidate>>;
+  recordGate(input: UiRecordGateInput): Promise<UiResult<UiMissionGate>>;
+  previewIntegration(
+    input: UiPreviewIntegrationInput,
+  ): Promise<UiResult<UiIntegrationPreview>>;
+  approveIntegration(
+    previewDigest: string,
+  ): Promise<UiResult<UiIntegrationResult>>;
+  rejectIntegration(
+    previewDigest: string,
+  ): Promise<UiResult<UiIntegrationResult>>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   onState(listener: (state: UiState) => void): () => void;
+  onMissionState(listener: (state: UiMissionState) => void): () => void;
 }

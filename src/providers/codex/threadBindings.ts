@@ -1,6 +1,10 @@
 import { readFile as nodeReadFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeJsonAtomic } from '../../config/atomicJson.js';
+import type {
+  CouncilAccessMode,
+  MissionInitialTaskDispatchState,
+} from '../missionContracts.js';
 import { isRecord } from './protocol.js';
 
 export const CODEX_THREAD_BINDINGS_FILENAME = 'codex-thread-bindings.json';
@@ -21,7 +25,11 @@ export interface CodexThreadBindingRecord {
   readonly taskId: string;
   readonly assignmentId: string;
   readonly roleProfileId: string;
+  readonly requestFingerprint: string;
+  readonly accessMode: CouncilAccessMode;
   readonly threadId: string;
+  readonly initialTaskDispatchState: MissionInitialTaskDispatchState;
+  readonly initialTaskTurnId?: string | undefined;
   readonly activeTurnId?: string | undefined;
   readonly state: CodexThreadBindingState;
   readonly createdAt: string;
@@ -38,6 +46,7 @@ export interface PendingCodexThreadStart {
   readonly assignmentId: string;
   readonly roleProfileId: string;
   readonly requestFingerprint: string;
+  readonly accessMode: CouncilAccessMode;
   readonly startedAt: string;
 }
 
@@ -105,7 +114,11 @@ const RECORD_KEYS = new Set([
   'taskId',
   'assignmentId',
   'roleProfileId',
+  'requestFingerprint',
+  'accessMode',
   'threadId',
+  'initialTaskDispatchState',
+  'initialTaskTurnId',
   'activeTurnId',
   'state',
   'createdAt',
@@ -121,6 +134,7 @@ const PENDING_KEYS = new Set([
   'assignmentId',
   'roleProfileId',
   'requestFingerprint',
+  'accessMode',
   'startedAt',
 ]);
 
@@ -189,9 +203,22 @@ function timestampField(
   const candidate = value[field];
   if (
     typeof candidate !== 'string' ||
-    !Number.isFinite(Date.parse(candidate))
+    !Number.isFinite(Date.parse(candidate)) ||
+    new Date(candidate).toISOString() !== candidate
   ) {
-    fail(`${context}.${field} must be an ISO timestamp.`);
+    fail(`${context}.${field} must be a canonical ISO timestamp.`);
+  }
+  return candidate;
+}
+
+function accessModeField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): CouncilAccessMode {
+  const candidate = value[field];
+  if (candidate !== 'read-only' && candidate !== 'workspace-write') {
+    fail(`${context}.${field} must be "read-only" or "workspace-write".`);
   }
   return candidate;
 }
@@ -224,11 +251,35 @@ function parseBinding(
     activeTurnValue === undefined
       ? undefined
       : stringField(value, 'activeTurnId', context, THREAD_ID_PATTERN);
+  const initialTaskDispatchState = value['initialTaskDispatchState'];
+  if (
+    initialTaskDispatchState !== 'not-started' &&
+    initialTaskDispatchState !== 'pending' &&
+    initialTaskDispatchState !== 'started'
+  ) {
+    fail(`${context}.initialTaskDispatchState is invalid.`);
+  }
+  const initialTaskTurnValue = value['initialTaskTurnId'];
+  const initialTaskTurnId =
+    initialTaskTurnValue === undefined
+      ? undefined
+      : stringField(value, 'initialTaskTurnId', context, THREAD_ID_PATTERN);
+  if (
+    (initialTaskDispatchState === 'started') !==
+    (initialTaskTurnId !== undefined)
+  ) {
+    fail(
+      `${context} must name initialTaskTurnId exactly when the initial task was started.`,
+    );
+  }
   if (state === 'active' && activeTurnId === undefined) {
     fail(`${context} must name activeTurnId while active.`);
   }
   if (state !== 'active' && activeTurnId !== undefined) {
     fail(`${context} cannot retain activeTurnId while ${state}.`);
+  }
+  if (state === 'active' && initialTaskDispatchState !== 'started') {
+    fail(`${context} cannot be active before its initial task was started.`);
   }
   return {
     bindingId: stringField(value, 'bindingId', context),
@@ -239,7 +290,16 @@ function parseBinding(
     taskId: stringField(value, 'taskId', context),
     assignmentId,
     roleProfileId: stringField(value, 'roleProfileId', context),
+    requestFingerprint: stringField(
+      value,
+      'requestFingerprint',
+      context,
+      FINGERPRINT_PATTERN,
+    ),
+    accessMode: accessModeField(value, 'accessMode', context),
     threadId: stringField(value, 'threadId', context, THREAD_ID_PATTERN),
+    initialTaskDispatchState,
+    ...(initialTaskTurnId === undefined ? {} : { initialTaskTurnId }),
     ...(activeTurnId === undefined ? {} : { activeTurnId }),
     state,
     createdAt: timestampField(value, 'createdAt', context),
@@ -276,6 +336,7 @@ function parsePending(
       context,
       FINGERPRINT_PATTERN,
     ),
+    accessMode: accessModeField(value, 'accessMode', context),
     startedAt: timestampField(value, 'startedAt', context),
   };
 }
@@ -344,7 +405,8 @@ function samePending(
     left.taskId === right.taskId &&
     left.assignmentId === right.assignmentId &&
     left.roleProfileId === right.roleProfileId &&
-    left.requestFingerprint === right.requestFingerprint
+    left.requestFingerprint === right.requestFingerprint &&
+    left.accessMode === right.accessMode
   );
 }
 
@@ -390,6 +452,12 @@ export class CodexThreadBindingStore {
         'code' in error &&
         error.code === 'ENOENT'
       ) {
+        if (this.lastKnownGood !== undefined) {
+          return this.loadFailure(
+            'read-failed',
+            'Codex thread bindings disappeared after a valid document was loaded.',
+          );
+        }
         const data = this.lastKnownGood ?? emptyFile();
         this.stateValue = {
           data,
@@ -476,7 +544,9 @@ export class CodexThreadBindingStore {
         pending.workspacePath !== binding.workspacePath ||
         pending.missionId !== binding.missionId ||
         pending.taskId !== binding.taskId ||
-        pending.roleProfileId !== binding.roleProfileId
+        pending.roleProfileId !== binding.roleProfileId ||
+        pending.requestFingerprint !== binding.requestFingerprint ||
+        pending.accessMode !== binding.accessMode
       ) {
         throw new CodexThreadBindingConflictError(
           'The Codex acknowledgement does not match the pending assignment.',
@@ -527,10 +597,61 @@ export class CodexThreadBindingStore {
           'Only an active Codex binding may name an active turn.',
         );
       }
+      if (
+        state === 'active' &&
+        binding.initialTaskDispatchState === 'not-started'
+      ) {
+        throw new CodexThreadBindingConflictError(
+          'The initial Codex task dispatch must be journaled before starting a turn.',
+        );
+      }
+      const startingInitialTask =
+        state === 'active' &&
+        binding.initialTaskDispatchState === 'pending';
       const updated: CodexThreadBindingRecord = {
         ...binding,
         ...(turnId === undefined ? { activeTurnId: undefined } : { activeTurnId: turnId }),
+        ...(startingInitialTask
+          ? {
+              initialTaskDispatchState: 'started' as const,
+              initialTaskTurnId: turnId,
+            }
+          : {}),
         state,
+        updatedAt: (this.options.now?.() ?? new Date()).toISOString(),
+      };
+      return {
+        data: {
+          ...current,
+          bindings: { ...current.bindings, [assignmentId]: updated },
+        },
+        value: updated,
+      };
+    });
+  }
+
+  beginInitialTaskDispatch(
+    expectedRevision: number,
+    assignmentId: string,
+  ): Promise<CodexThreadBindingRecord> {
+    return this.mutate(expectedRevision, (current) => {
+      const binding = current.bindings[assignmentId];
+      if (binding === undefined) {
+        throw new CodexThreadBindingConflictError(
+          `Assignment "${assignmentId}" has no exact Codex binding.`,
+        );
+      }
+      if (
+        binding.state !== 'idle' ||
+        binding.initialTaskDispatchState !== 'not-started'
+      ) {
+        throw new CodexThreadBindingConflictError(
+          'The initial Codex task can only be journaled once from an idle, not-started binding.',
+        );
+      }
+      const updated: CodexThreadBindingRecord = {
+        ...binding,
+        initialTaskDispatchState: 'pending',
         updatedAt: (this.options.now?.() ?? new Date()).toISOString(),
       };
       return {

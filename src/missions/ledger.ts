@@ -103,6 +103,9 @@ const LEASE_KEYS = new Set([
   'missionId',
   'taskId',
   'workspaceId',
+  'assignmentId',
+  'ownerProfileId',
+  'accessMode',
   'branchName',
   'canonicalPath',
   'baseCommitSha',
@@ -118,7 +121,12 @@ const EXECUTION_KEYS = new Set([
   'workspaceId',
   'profileId',
   'providerId',
+  'definitionFingerprint',
+  'accessMode',
+  'providerAction',
+  'gateResponsibility',
   'providerResourceId',
+  'failureReason',
   'state',
   'createdAt',
   'updatedAt',
@@ -164,6 +172,9 @@ const GATE_KEYS = new Set([
   'status',
   'commitSha',
   'treeSha',
+  'commandIds',
+  'gatePolicyFingerprint',
+  'executorExecutionId',
   'executorProfileId',
   'evidence',
   'createdAt',
@@ -354,7 +365,11 @@ function gitObjectId(value: unknown, location: string): string {
 function stringArray(
   value: unknown,
   location: string,
-  options: { readonly maxItems?: number; readonly maxLength?: number } = {},
+  options: {
+    readonly maxItems?: number;
+    readonly maxLength?: number;
+    readonly opaque?: boolean;
+  } = {},
 ): string[] {
   if (!Array.isArray(value)) throw new Error(`${location} must be an array`);
   if (value.length > (options.maxItems ?? 1_000)) {
@@ -363,6 +378,7 @@ function stringArray(
   return value.map((entry, index) =>
     text(entry, `${location}[${index}]`, {
       max: options.maxLength ?? 8_192,
+      ...(options.opaque === undefined ? {} : { opaque: options.opaque }),
     }),
   );
 }
@@ -483,6 +499,20 @@ function parseLease(value: unknown, location: string): WorktreeLeaseRecord {
       max: 512,
       opaque: true,
     }),
+    assignmentId: id(
+      raw['assignmentId'],
+      'execution',
+      `${location}.assignmentId`,
+    ),
+    ownerProfileId: profileId(
+      raw['ownerProfileId'],
+      `${location}.ownerProfileId`,
+    ),
+    accessMode: enumValue(
+      raw['accessMode'],
+      new Set(['workspace-write'] as const),
+      `${location}.accessMode`,
+    ),
     branchName: text(raw['branchName'], `${location}.branchName`, { max: 512 }),
     canonicalPath,
     baseCommitSha: gitObjectId(raw['baseCommitSha'], `${location}.baseCommitSha`),
@@ -511,6 +541,28 @@ function parseExecution(
     location,
     { max: 2_048 },
   );
+  const failureReason = optionalText(raw, 'failureReason', location, {
+    max: 2_000,
+  });
+  const gateResponsibility =
+    !Object.hasOwn(raw, 'gateResponsibility') ||
+    raw['gateResponsibility'] === undefined
+      ? undefined
+      : enumValue(
+          raw['gateResponsibility'],
+          new Set(['test', 'review'] as const),
+          `${location}.gateResponsibility`,
+        );
+  const definitionFingerprint = text(
+    raw['definitionFingerprint'],
+    `${location}.definitionFingerprint`,
+    { max: 64 },
+  );
+  if (!SHA_256.test(definitionFingerprint)) {
+    throw new Error(
+      `${location}.definitionFingerprint must be a SHA-256 digest`,
+    );
+  }
   return {
     id: id(raw['id'], 'execution', `${location}.id`),
     missionId: id(raw['missionId'], 'mission', `${location}.missionId`),
@@ -524,7 +576,22 @@ function parseExecution(
       max: 128,
       opaque: true,
     }),
+    definitionFingerprint,
+    accessMode: enumValue(
+      raw['accessMode'],
+      new Set(['read-only', 'workspace-write'] as const),
+      `${location}.accessMode`,
+    ),
+    providerAction: enumValue(
+      raw['providerAction'],
+      new Set(['start', 'reuse', 'resume'] as const),
+      `${location}.providerAction`,
+    ),
+    ...(gateResponsibility === undefined
+      ? {}
+      : { gateResponsibility }),
     ...(providerResourceId === undefined ? {} : { providerResourceId }),
+    ...(failureReason === undefined ? {} : { failureReason }),
     state: enumValue(
       raw['state'],
       new Set(['starting', 'running', 'blocked', 'completed', 'failed'] as const),
@@ -635,6 +702,18 @@ function parseCandidate(
 function parseGate(value: unknown, location: string): MissionGateRecord {
   const raw = record(value, location);
   onlyKeys(raw, GATE_KEYS, location);
+  const commandIds = stringArray(
+    raw['commandIds'],
+    `${location}.commandIds`,
+    {
+      maxItems: 100,
+      maxLength: 128,
+      opaque: true,
+    },
+  );
+  if (new Set(commandIds).size !== commandIds.length) {
+    throw new Error(`${location}.commandIds must not contain duplicate IDs`);
+  }
   return {
     id: id(raw['id'], 'gate', `${location}.id`),
     missionId: id(raw['missionId'], 'mission', `${location}.missionId`),
@@ -655,6 +734,25 @@ function parseGate(value: unknown, location: string): MissionGateRecord {
     ),
     commitSha: gitObjectId(raw['commitSha'], `${location}.commitSha`),
     treeSha: gitObjectId(raw['treeSha'], `${location}.treeSha`),
+    commandIds,
+    gatePolicyFingerprint: (() => {
+      const value = text(
+        raw['gatePolicyFingerprint'],
+        `${location}.gatePolicyFingerprint`,
+        { max: 64 },
+      );
+      if (!SHA_256.test(value)) {
+        throw new Error(
+          `${location}.gatePolicyFingerprint must be a SHA-256 digest`,
+        );
+      }
+      return value;
+    })(),
+    executorExecutionId: id(
+      raw['executorExecutionId'],
+      'execution',
+      `${location}.executorExecutionId`,
+    ),
     executorProfileId: profileId(
       raw['executorProfileId'],
       `${location}.executorProfileId`,
@@ -877,6 +975,30 @@ function validateTaskGraph(data: MissionLedgerFileV1): void {
     ) {
       throw new Error(`${task.state} task "${task.id}" requires an active handoff`);
     }
+    if (
+      task.worktreeLeaseId !== undefined &&
+      data.leases[task.worktreeLeaseId]?.taskId !== task.id
+    ) {
+      throw new Error(`task "${task.id}" references a missing or foreign lease`);
+    }
+    if (
+      task.executionId !== undefined &&
+      data.executions[task.executionId]?.taskId !== task.id
+    ) {
+      throw new Error(`task "${task.id}" references a missing or foreign execution`);
+    }
+    for (const handoffId of task.handoffIds) {
+      if (data.handoffs[handoffId]?.taskId !== task.id) {
+        throw new Error(`task "${task.id}" references a missing or foreign handoff`);
+      }
+    }
+    if (
+      task.activeHandoffId !== undefined &&
+      (data.handoffs[task.activeHandoffId]?.taskId !== task.id ||
+        !task.handoffIds.includes(task.activeHandoffId))
+    ) {
+      throw new Error(`task "${task.id}" active handoff is not in its exact history`);
+    }
   }
 
   const visiting = new Set<string>();
@@ -901,12 +1023,17 @@ function validateReferences(data: MissionLedgerFileV1): void {
     if (
       task === undefined ||
       task.missionId !== lease.missionId ||
-      task.worktreeLeaseId !== lease.id
+      task.worktreeLeaseId !== lease.id ||
+      task.executionId !== lease.assignmentId ||
+      task.assigneeProfileId !== lease.ownerProfileId ||
+      lease.accessMode !== 'workspace-write'
     ) {
       throw new Error(`lease "${lease.id}" is not exactly owned by its task`);
     }
   }
 
+  const providerResourceOwners = new Map<string, string>();
+  const gateResponsibilityOwners = new Map<string, string>();
   for (const execution of Object.values(data.executions)) {
     requireMission(
       data,
@@ -930,6 +1057,65 @@ function validateReferences(data: MissionLedgerFileV1): void {
       throw new Error(
         `${execution.state} execution "${execution.id}" requires an exact provider resource`,
       );
+    }
+    if (
+      execution.failureReason !== undefined &&
+      execution.state !== 'blocked' &&
+      execution.state !== 'failed'
+    ) {
+      throw new Error(
+        `execution "${execution.id}" has a failure reason in state ${execution.state}`,
+      );
+    }
+    if (execution.accessMode === 'workspace-write') {
+      const lease =
+        task.worktreeLeaseId === undefined
+          ? undefined
+          : data.leases[task.worktreeLeaseId];
+      if (
+        lease?.assignmentId !== execution.id ||
+        lease.ownerProfileId !== execution.profileId ||
+        lease.accessMode !== 'workspace-write'
+      ) {
+        throw new Error(
+          `workspace-write execution "${execution.id}" requires its exact writer lease`,
+        );
+      }
+    } else if (task.worktreeLeaseId !== undefined) {
+      throw new Error(
+        `read-only execution "${execution.id}" cannot own a writer lease`,
+      );
+    }
+    if (execution.gateResponsibility !== undefined) {
+      if (execution.accessMode !== 'read-only') {
+        throw new Error(
+          `gate execution "${execution.id}" must be read-only`,
+        );
+      }
+      const responsibilityKey =
+        `${execution.missionId}:${execution.gateResponsibility}`;
+      const owner = gateResponsibilityOwners.get(
+        responsibilityKey,
+      );
+      if (owner !== undefined && owner !== execution.id) {
+        throw new Error(
+          `${execution.gateResponsibility} gate responsibility is owned by both executions "${owner}" and "${execution.id}"`,
+        );
+      }
+      gateResponsibilityOwners.set(
+        responsibilityKey,
+        execution.id,
+      );
+    }
+    if (execution.providerResourceId !== undefined) {
+      const identity = `${execution.providerId}\0${execution.providerResourceId}`;
+      const owner = providerResourceOwners.get(identity);
+      if (owner !== undefined) {
+        throw new Error(
+          `provider resource is owned by both executions "${owner}" and "${execution.id}"`,
+        );
+      }
+      providerResourceOwners.set(identity, execution.id);
     }
   }
 
@@ -994,6 +1180,7 @@ function validateReferences(data: MissionLedgerFileV1): void {
   for (const gate of Object.values(data.gates)) {
     requireMission(data, gate.missionId, gate.workspaceId, `gate "${gate.id}"`);
     const candidate = data.candidates[gate.candidateId];
+    const executor = data.executions[gate.executorExecutionId];
     if (
       candidate === undefined ||
       candidate.missionId !== gate.missionId ||
@@ -1001,6 +1188,35 @@ function validateReferences(data: MissionLedgerFileV1): void {
       candidate.treeSha !== gate.treeSha
     ) {
       throw new Error(`gate "${gate.id}" is not bound to its exact candidate commit and tree`);
+    }
+    if (
+      executor === undefined ||
+      executor.missionId !== gate.missionId ||
+      executor.workspaceId !== gate.workspaceId ||
+      executor.profileId !== gate.executorProfileId ||
+      executor.accessMode !== 'read-only' ||
+      executor.gateResponsibility !== gate.kind ||
+      executor.providerResourceId === undefined ||
+      (executor.state !== 'running' && executor.state !== 'completed')
+    ) {
+      throw new Error(`gate "${gate.id}" has no exact eligible executor`);
+    }
+    const producerExecutions = new Set(
+      candidate.orderedHandoffIds
+        .map((handoffId) => data.handoffs[handoffId]?.executionId)
+        .filter((executionId) => executionId !== undefined),
+    );
+    const producerProfiles = new Set(
+      [...producerExecutions]
+        .map((executionId) => data.executions[executionId])
+        .filter((execution) => execution !== undefined)
+        .map((execution) => execution.profileId),
+    );
+    if (
+      producerExecutions.has(executor.id) ||
+      producerProfiles.has(executor.profileId)
+    ) {
+      throw new Error(`gate "${gate.id}" is self-certified by a handoff producer`);
     }
   }
 
@@ -1026,8 +1242,35 @@ function validateReferences(data: MissionLedgerFileV1): void {
     ) {
       throw new Error(`approval "${approval.id}" requires passed Test and Review gates`);
     }
-    if (testGate.executorProfileId === reviewGate.executorProfileId) {
+    if (
+      testGate.executorProfileId === reviewGate.executorProfileId ||
+      testGate.executorExecutionId === reviewGate.executorExecutionId
+    ) {
       throw new Error(`approval "${approval.id}" requires independent gate executors`);
+    }
+    if (
+      testGate.gatePolicyFingerprint !== reviewGate.gatePolicyFingerprint
+    ) {
+      throw new Error(
+        `approval "${approval.id}" requires one exact gate policy fingerprint`,
+      );
+    }
+    const producerProfiles = new Set(
+      candidate.orderedHandoffIds
+        .map((handoffId) => data.handoffs[handoffId])
+        .map((handoff) =>
+          handoff === undefined ? undefined : data.executions[handoff.executionId],
+        )
+        .filter((execution) => execution !== undefined)
+        .map((execution) => execution.profileId),
+    );
+    if (
+      producerProfiles.has(testGate.executorProfileId) ||
+      producerProfiles.has(reviewGate.executorProfileId)
+    ) {
+      throw new Error(
+        `approval "${approval.id}" requires gates independent from handoff producers`,
+      );
     }
     if (
       testGate.commitSha !== candidate.commitSha ||
@@ -1193,6 +1436,7 @@ export class MissionLedgerStore {
   private problemValue: MissionLedgerStoreProblem | undefined;
   private loadedValue = false;
   private fileExistsValue = false;
+  private hasKnownGoodValue = false;
   private queue: Promise<void> = Promise.resolve();
   private readonly readText: (file: string) => Promise<string>;
   private readonly writeData: (
@@ -1271,6 +1515,7 @@ export class MissionLedgerStore {
 
       this.dataValue = parsed;
       this.fileExistsValue = true;
+      this.hasKnownGoodValue = true;
       this.loadedValue = true;
       this.problemValue = undefined;
       return { value, revision: parsed.revision };
@@ -1293,10 +1538,19 @@ export class MissionLedgerStore {
       this.fileExistsValue = true;
     } catch (error) {
       if (errorCode(error) === 'ENOENT') {
+        if (this.hasKnownGoodValue && this.fileExistsValue) {
+          this.problemValue = this.makeProblem(
+            'read',
+            new Error('The Mission ledger disappeared after it was loaded.'),
+          );
+          this.loadedValue = true;
+          return;
+        }
         this.dataValue = emptyMissionLedgerFile();
         this.problemValue = undefined;
         this.loadedValue = true;
         this.fileExistsValue = false;
+        this.hasKnownGoodValue = true;
         return;
       }
       this.problemValue = this.makeProblem('read', error);
@@ -1306,6 +1560,7 @@ export class MissionLedgerStore {
 
     try {
       this.dataValue = parseMissionLedgerFile(JSON.parse(source) as unknown);
+      this.hasKnownGoodValue = true;
       this.problemValue = undefined;
       this.loadedValue = true;
     } catch (error) {

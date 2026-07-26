@@ -15,6 +15,9 @@ export type {
   WorktreeLeaseWorkspace,
 } from './leaseManager.js';
 export type {
+  GateWorktreeRunRecord,
+  GateWorktreeRunState,
+  GateWorktreeRunTerminalResult,
   PendingWorktreeOperation,
   PendingWorktreeOperationKind,
   WorktreeLeaseRecord,

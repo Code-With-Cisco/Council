@@ -136,6 +136,8 @@ export interface CodexAppServerClientOptions {
   readonly maxLineBytes?: number | undefined;
   readonly maxOutputDeltaChars?: number | undefined;
   readonly maxStderrChars?: number | undefined;
+  readonly maxPendingRequests?: number | undefined;
+  readonly maxPendingApprovals?: number | undefined;
   readonly now?: (() => Date) | undefined;
   readonly approvalId?: (() => string) | undefined;
 }
@@ -145,7 +147,21 @@ const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_LINE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_DELTA_CHARS = 64 * 1024;
 const DEFAULT_MAX_STDERR_CHARS = 16 * 1024;
+const DEFAULT_MAX_PENDING_REQUESTS = 256;
+const DEFAULT_MAX_PENDING_APPROVALS = 64;
 const MAX_SETTLED_IDS = 128;
+
+function positiveSafeInteger(
+  value: number | undefined,
+  name: string,
+): void {
+  if (
+    value !== undefined &&
+    (!Number.isSafeInteger(value) || value <= 0)
+  ) {
+    throw new TypeError(`${name} must be a positive safe integer.`);
+  }
+}
 
 function requestKey(id: WireRequestId): string {
   return `${typeof id}:${String(id)}`;
@@ -225,6 +241,11 @@ function parseTurnResult(value: unknown, context: string): CodexTurn {
   return parseTurn(value['turn'], `${context} result.turn`);
 }
 
+function parseTurnIdResult(value: unknown, context: string): string {
+  if (!isRecord(value)) throw new Error(`${context} result must be an object.`);
+  return requiredString(value, 'turnId', `${context} result`);
+}
+
 function turnSandboxPolicy(
   mode: NonNullable<CodexTurnStartRequest['sandboxMode']>,
   cwd: string | undefined,
@@ -266,7 +287,18 @@ export class CodexAppServerClient {
     diagnostic: undefined,
   };
 
-  constructor(private readonly options: CodexAppServerClientOptions) {}
+  constructor(private readonly options: CodexAppServerClientOptions) {
+    positiveSafeInteger(options.requestTimeoutMs, 'requestTimeoutMs');
+    positiveSafeInteger(options.approvalTimeoutMs, 'approvalTimeoutMs');
+    positiveSafeInteger(options.maxLineBytes, 'maxLineBytes');
+    positiveSafeInteger(
+      options.maxOutputDeltaChars,
+      'maxOutputDeltaChars',
+    );
+    positiveSafeInteger(options.maxStderrChars, 'maxStderrChars');
+    positiveSafeInteger(options.maxPendingRequests, 'maxPendingRequests');
+    positiveSafeInteger(options.maxPendingApprovals, 'maxPendingApprovals');
+  }
 
   get state(): CodexConnectionState {
     return this.stateValue;
@@ -282,11 +314,15 @@ export class CodexAppServerClient {
   }
 
   connect(): Promise<CodexConnectionState> {
-    if (
-      this.stateValue.phase === 'ready' ||
-      this.stateValue.phase === 'unauthenticated'
-    ) {
+    if (this.stateValue.phase === 'ready') {
       return Promise.resolve(this.stateValue);
+    }
+    if (
+      this.stateValue.phase === 'unauthenticated' &&
+      this.initialized &&
+      this.connection !== undefined
+    ) {
+      return this.refreshAccount().then(() => this.stateValue);
     }
     if (this.connectPromise !== undefined) return this.connectPromise;
     this.connectPromise = this.connectInternal().finally(() => {
@@ -362,9 +398,9 @@ export class CodexAppServerClient {
     threadId: string,
     expectedTurnId: string,
     text: string,
-  ): Promise<CodexTurn> {
+  ): Promise<string> {
     this.requireAuthenticated();
-    return parseTurnResult(
+    return parseTurnIdResult(
       await this.request('turn/steer', {
         threadId,
         expectedTurnId,
@@ -516,6 +552,16 @@ export class CodexAppServerClient {
         ),
       );
     }
+    const maximumPending =
+      this.options.maxPendingRequests ?? DEFAULT_MAX_PENDING_REQUESTS;
+    if (this.pending.size >= maximumPending) {
+      return Promise.reject(
+        new CodexAppServerError(
+          'provider-error',
+          `Codex App Server has reached its ${maximumPending}-request safety bound.`,
+        ),
+      );
+    }
     const id = ++this.requestSequence;
     const key = requestKey(id);
     const timeoutMs =
@@ -581,7 +627,8 @@ export class CodexAppServerClient {
       if (line.at(-1) === 0x0d) line = line.subarray(0, -1);
       if (line.length === 0) continue;
       try {
-        this.handleMessage(JSON.parse(line.toString('utf8')) as unknown);
+        const decoded = new TextDecoder('utf-8', { fatal: true }).decode(line);
+        this.handleMessage(JSON.parse(decoded) as unknown);
       } catch (error) {
         this.transportFailed(
           error instanceof CodexAppServerError
@@ -734,6 +781,15 @@ export class CodexAppServerClient {
         message: `Codex turn ${optionalString(params, 'turnId') ?? '(unknown)'} reported an error.`,
         payload: params['error'],
       });
+      return;
+    }
+    if (method === 'account/updated') {
+      void this.refreshAccount().catch((error) => {
+        this.emit({
+          type: 'provider-error',
+          message: `Could not refresh Codex authentication state: ${safeErrorMessage(error)}`,
+        });
+      });
     }
   }
 
@@ -766,9 +822,40 @@ export class CodexAppServerClient {
       }).catch((error) => this.transportFailed(error));
       return;
     }
+    if (
+      [...this.approvals.values()].some(
+        (approval) => requestKey(approval.wireId) === requestKey(wireId),
+      )
+    ) {
+      void this.writeMessage({
+        id: wireId,
+        result: { decision: 'decline' },
+      }).catch((error) => this.transportFailed(error));
+      this.emit({
+        type: 'protocol-warning',
+        message: 'Declined a duplicate Codex approval request ID.',
+      });
+      return;
+    }
+    const maximumApprovals =
+      this.options.maxPendingApprovals ?? DEFAULT_MAX_PENDING_APPROVALS;
+    if (this.approvals.size >= maximumApprovals) {
+      void this.writeMessage({
+        id: wireId,
+        result: { decision: 'decline' },
+      }).catch((error) => this.transportFailed(error));
+      this.emit({
+        type: 'protocol-warning',
+        message: `Declined Codex approval beyond the ${maximumApprovals}-request safety bound.`,
+      });
+      return;
+    }
     let attention: CodexApprovalAttention;
     try {
       const approvalId = this.options.approvalId?.() ?? randomUUID();
+      if (this.approvals.has(approvalId)) {
+        throw new Error('Codex approval identity collision.');
+      }
       const kind =
         method === 'item/commandExecution/requestApproval'
           ? 'command'

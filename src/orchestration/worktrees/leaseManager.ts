@@ -27,6 +27,8 @@ export interface ProvisionWriterLeaseRequest {
   readonly assignmentId: string;
   readonly ownerProfileId: string;
   readonly baseCommit: string;
+  /** Exact ID shown in a privileged Mission preview. */
+  readonly plannedLeaseId?: string | undefined;
 }
 
 export interface WorktreeLeaseManagerOptions {
@@ -198,13 +200,66 @@ export class WorktreeLeaseManager {
         existing.missionId !== request.missionId ||
         existing.taskId !== request.taskId ||
         existing.ownerProfileId !== request.ownerProfileId ||
-        existing.baseCommit !== request.baseCommit
+        existing.baseCommit !== request.baseCommit ||
+        (request.plannedLeaseId !== undefined &&
+          existing.leaseId !== request.plannedLeaseId)
       ) {
         throw new WorktreeLeaseOperationError(
           'That assignment already owns a different writer lease.',
         );
       }
-      return this.reconcileUnlocked(existing.leaseId);
+      const reconciled = await this.reconcileUnlocked(existing.leaseId);
+      if (reconciled.state !== 'provisioning') return reconciled;
+      const pending = this.pendingForLease(reconciled.leaseId, 'provision');
+      if (pending === undefined) {
+        throw new WorktreeLeaseOperationError(
+          'Provisioning retry has no exact durable operation journal.',
+        );
+      }
+      const branch = await this.git.tryResolveCommit(
+        reconciled.repositoryRoot,
+        reconciled.branchRef,
+      );
+      if (branch !== undefined) {
+        // Reconciliation normally recreates an existing exact branch. A
+        // remaining provisioning result means it could not prove a safe retry.
+        throw new WorktreeLeaseOperationError(
+          'Provisioning retry could not reconcile the existing Council branch.',
+        );
+      }
+      if (await pathExists(reconciled.checkoutPath)) {
+        throw new WorktreeLeaseOperationError(
+          'Provisioning retry path exists without an exact registered worktree.',
+        );
+      }
+      await mkdir(path.dirname(reconciled.checkoutPath), { recursive: true });
+      try {
+        await this.git.createWriterWorktree({
+          repository: this.repositoryForLease(reconciled),
+          checkoutPath: reconciled.checkoutPath,
+          branchRef: reconciled.branchRef,
+          baseCommit: reconciled.baseCommit,
+        });
+      } catch (error) {
+        throw new WorktreeLeaseOperationError(
+          `Provisioning retry had an uncertain or failed outcome; its journal remains: ${message(error)}`,
+        );
+      }
+      const inspection = await this.verifyLease(reconciled, true);
+      return this.activateProvisionedLease(
+        reconciled,
+        pending,
+        inspection,
+        this.store.state.data.revision,
+      );
+    }
+    if (
+      request.plannedLeaseId !== undefined &&
+      this.store.getLease(request.plannedLeaseId) !== undefined
+    ) {
+      throw new WorktreeLeaseOperationError(
+        'The planned writer lease ID already belongs to another assignment.',
+      );
     }
 
     const repository = await this.git.inspectRepository(
@@ -226,7 +281,7 @@ export class WorktreeLeaseManager {
     }
 
     const worktreeRoot = await this.ensureWorktreeRoot();
-    const leaseId = this.makeLeaseId();
+    const leaseId = request.plannedLeaseId ?? this.makeLeaseId();
     const operationId = this.makeOperationId();
     const leaseToken = this.idToken(leaseId, 'lease_');
     const workspaceToken = createHash('sha256')
@@ -253,6 +308,7 @@ export class WorktreeLeaseManager {
       taskId: request.taskId,
       assignmentId: request.assignmentId,
       ownerProfileId: request.ownerProfileId,
+      accessMode: 'workspace-write',
       repositoryRoot: repository.repositoryRoot,
       commonGitDir: repository.commonGitDir,
       objectFormat: repository.objectFormat,
@@ -323,6 +379,11 @@ export class WorktreeLeaseManager {
           lease,
           'Cleanup state is inconsistent between Git registry and filesystem.',
         );
+      }
+      try {
+        await this.verifyLease(lease, false, worktrees);
+      } catch (error) {
+        return this.blockLease(lease, message(error));
       }
       return lease;
     }
@@ -440,9 +501,22 @@ export class WorktreeLeaseManager {
     const lease = await this.reconcileUnlocked(leaseId);
     if (lease.state === 'removed') return lease;
     if (lease.state === 'cleanup-pending') {
-      throw new WorktreeLeaseOperationError(
-        'Cleanup already has an uncertain pending outcome; reconcile it before retrying.',
-      );
+      const existingPending = this.pendingForLease(leaseId, 'cleanup');
+      if (
+        existingPending === undefined ||
+        existingPending.expectedHead !== expectedHead
+      ) {
+        throw new WorktreeLeaseOperationError(
+          'Pending cleanup does not match the expected retained HEAD.',
+        );
+      }
+      const pendingInspection = await this.verifyLease(lease, false);
+      if (!pendingInspection.clean || pendingInspection.commit !== expectedHead) {
+        throw new WorktreeLeaseOperationError(
+          'Pending cleanup target is dirty or changed; no removal was retried.',
+        );
+      }
+      return this.executeCleanup(lease);
     }
     if (lease.state !== 'retained') {
       throw new WorktreeLeaseOperationError(
@@ -493,6 +567,12 @@ export class WorktreeLeaseManager {
       };
       mutablePending(draft)[operationId] = pending;
     });
+    return this.executeCleanup(this.requiredLease(leaseId));
+  }
+
+  private async executeCleanup(
+    lease: WorktreeLeaseRecord,
+  ): Promise<WorktreeLeaseRecord> {
     try {
       await this.git.removeWorktree(
         lease.repositoryRoot,
@@ -512,7 +592,7 @@ export class WorktreeLeaseManager {
         'Git reported cleanup success but the exact worktree still exists; journal retained.',
       );
     }
-    return this.finalizeRemovedLease(this.requiredLease(leaseId));
+    return this.finalizeRemovedLease(this.requiredLease(lease.leaseId));
   }
 
   private async verifyLease(

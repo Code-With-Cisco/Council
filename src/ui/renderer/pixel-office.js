@@ -381,6 +381,17 @@
               ? '#f2efe8'
               : '#6b7682';
       label(agent ? shortLabel(agent.label) : 'OPEN STATION', x + 32, y + 42, textColor, 7);
+      if (agent?.missionBadge) {
+        pixel(x + 2, y + 45, 60, 9, '#14282b');
+        pixel(x + 2, y + 45, 60, 1, '#64bfc2');
+        label(
+          shortLabel(agent.missionBadge.label),
+          x + 32,
+          y + 52,
+          '#7bd4d0',
+          6,
+        );
+      }
 
       if (agent) {
         hitboxes.push({
@@ -389,7 +400,7 @@
           x: x * SCALE,
           y: (y - 46) * SCALE,
           width: 64 * SCALE,
-          height: 92 * SCALE,
+          height: 100 * SCALE,
         });
       }
     }

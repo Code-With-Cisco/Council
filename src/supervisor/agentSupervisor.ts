@@ -24,6 +24,7 @@ import type {
   AgentProviderAdapter,
   ClaudeRuntimeReader,
 } from '../providers/contracts.js';
+import type { CouncilAccessMode } from '../providers/missionContracts.js';
 import type { ResolvedAgentCatalog } from './catalog.js';
 import {
   SafeLaunchCoordinator,
@@ -45,6 +46,9 @@ export interface ClaudeCodeAgentSupervisorOptions {
   readonly catalog: ResolvedAgentCatalog;
   /** Fresh disk discovery used by every launch transaction. */
   readonly resolveCatalog: () => Promise<ResolvedAgentCatalog>;
+  readonly authorizeMissionLaunchCwd?:
+    | ((profileId: string, canonicalCwd: string) => Promise<boolean>)
+    | undefined;
   readonly validations: ReadonlyMap<string, AgentValidation>;
   readonly catalogProblems?: readonly ParseProblem[] | undefined;
   readonly councilProfileId?: string | undefined;
@@ -147,6 +151,9 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
         this.syncRuntimeProjection(false);
         return (await this.runtime.refresh()).roster.sessions;
       },
+      ...(options.authorizeMissionLaunchCwd === undefined
+        ? {}
+        : { authorizeLaunchCwd: options.authorizeMissionLaunchCwd }),
     });
   }
 
@@ -193,6 +200,33 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
       this.launchCoordinator.startProfile(profileId, {
         replaceExisting: true,
         expectedDefinitionFingerprint,
+      }),
+    );
+  }
+
+  /**
+   * Mission-only launch seam. The caller is the privileged Mission router,
+   * which supplies an exact Council-authorized source checkout or worktree.
+   */
+  startMissionMember(
+    profileId: string,
+    missionExecutionId: string,
+    expectedDefinitionFingerprint: string,
+    taskPrompt: string,
+    launchCwd: string,
+    accessMode: CouncilAccessMode,
+  ): Promise<CliResult<StartSessionOutcome>> {
+    return this.trackResult(() =>
+      this.launchCoordinator.startProfile(profileId, {
+        rejectExisting: true,
+        promptOverride: taskPrompt,
+        expectedDefinitionFingerprint,
+        launchCwd,
+        missionExecutionId,
+        missionAccessMode: accessMode,
+        ...(accessMode === 'read-only'
+          ? { permissionModeOverride: 'plan' as const }
+          : {}),
       }),
     );
   }

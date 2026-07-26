@@ -10,6 +10,9 @@ export const SESSION_BINDINGS_VERSION = 1 as const;
 export const CLAUDE_CODE_PROVIDER_ID = 'claude-code' as const;
 
 export type SessionProviderId = typeof CLAUDE_CODE_PROVIDER_ID;
+export type MissionBindingAccessMode =
+  | 'read-only'
+  | 'workspace-write';
 
 /**
  * Durable ownership record for one profile's Claude-owned conversation.
@@ -30,6 +33,8 @@ export interface SessionBindingRecord {
   readonly catalogId: string;
   readonly definitionFingerprint: string;
   readonly requestedCanonicalCwd: string;
+  readonly missionExecutionId?: string | undefined;
+  readonly missionAccessMode?: MissionBindingAccessMode | undefined;
   readonly actualCanonicalCwd?: string | undefined;
   readonly createdAt: string;
   readonly lastConfirmedAt: string;
@@ -50,6 +55,8 @@ export interface PendingLaunchRecord {
   readonly catalogId: string;
   readonly definitionFingerprint: string;
   readonly requestedCanonicalCwd: string;
+  readonly missionExecutionId?: string | undefined;
+  readonly missionAccessMode?: MissionBindingAccessMode | undefined;
   readonly createdAt: string;
   /**
    * A provider warning proved that this transaction launched the wrong agent.
@@ -109,6 +116,8 @@ const BINDING_KEYS = new Set([
   'catalogId',
   'definitionFingerprint',
   'requestedCanonicalCwd',
+  'missionExecutionId',
+  'missionAccessMode',
   'actualCanonicalCwd',
   'createdAt',
   'lastConfirmedAt',
@@ -122,11 +131,15 @@ const PENDING_KEYS = new Set([
   'catalogId',
   'definitionFingerprint',
   'requestedCanonicalCwd',
+  'missionExecutionId',
+  'missionAccessMode',
   'createdAt',
   'disposition',
 ]);
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const SHA_256 = /^[0-9a-f]{64}$/i;
+const MISSION_EXECUTION_ID =
+  /^execution[_-][A-Za-z0-9_-]{1,500}$/;
 const CONTROL_BYTES = /[\u0000-\u001f\u007f]/;
 
 function emptyRecord<T>(): Record<string, T> {
@@ -212,6 +225,45 @@ function parseProfileId(value: unknown, location: string): string {
   return candidate;
 }
 
+function parseMissionIdentity(
+  record: Readonly<Record<string, unknown>>,
+  location: string,
+):
+  | {
+      readonly missionExecutionId: string;
+      readonly missionAccessMode: MissionBindingAccessMode;
+    }
+  | undefined {
+  const missionExecutionId = optionalString(
+    record,
+    'missionExecutionId',
+    location,
+    { maxLength: 512 },
+  );
+  const rawAccessMode = record['missionAccessMode'];
+  const missionAccessMode =
+    rawAccessMode === 'read-only' ||
+    rawAccessMode === 'workspace-write'
+      ? rawAccessMode
+      : undefined;
+  if (
+    missionExecutionId === undefined &&
+    rawAccessMode === undefined
+  ) {
+    return undefined;
+  }
+  if (
+    missionExecutionId === undefined ||
+    !MISSION_EXECUTION_ID.test(missionExecutionId) ||
+    missionAccessMode === undefined
+  ) {
+    throw new Error(
+      `${location} Mission identity requires a valid execution ID and access mode`,
+    );
+  }
+  return { missionExecutionId, missionAccessMode };
+}
+
 function parseBinding(value: unknown, location: string): SessionBindingRecord {
   const record = assertRecord(value, location);
   assertOnlyKeys(record, BINDING_KEYS, location);
@@ -221,6 +273,7 @@ function parseBinding(value: unknown, location: string): SessionBindingRecord {
     opaque: true,
   });
   const actualCanonicalCwd = optionalString(record, 'actualCanonicalCwd', location);
+  const missionIdentity = parseMissionIdentity(record, location);
 
   return {
     providerId: parseProviderId(record['providerId'], `${location}.providerId`),
@@ -252,6 +305,7 @@ function parseBinding(value: unknown, location: string): SessionBindingRecord {
       record['requestedCanonicalCwd'],
       `${location}.requestedCanonicalCwd`,
     ),
+    ...(missionIdentity === undefined ? {} : missionIdentity),
     ...(actualCanonicalCwd === undefined ? {} : { actualCanonicalCwd }),
     createdAt: requiredString(record['createdAt'], `${location}.createdAt`, {
       maxLength: 128,
@@ -268,6 +322,7 @@ function parsePendingLaunch(value: unknown, location: string): PendingLaunchReco
   const record = assertRecord(value, location);
   assertOnlyKeys(record, PENDING_KEYS, location);
   const disposition = record['disposition'];
+  const missionIdentity = parseMissionIdentity(record, location);
   if (
     disposition !== undefined &&
     disposition !== 'rejected-substitution'
@@ -302,6 +357,7 @@ function parsePendingLaunch(value: unknown, location: string): PendingLaunchReco
       record['requestedCanonicalCwd'],
       `${location}.requestedCanonicalCwd`,
     ),
+    ...(missionIdentity === undefined ? {} : missionIdentity),
     createdAt: requiredString(record['createdAt'], `${location}.createdAt`, {
       maxLength: 128,
       timestamp: true,
@@ -357,6 +413,7 @@ export function parseSessionBindingsFile(value: unknown): SessionBindingsFileV1 
   const pendingLaunches = emptyRecord<PendingLaunchRecord>();
   const sessionOwners = new Map<string, string>();
   const launchNameOwners = new Map<string, string>();
+  const missionExecutionOwners = new Map<string, string>();
 
   for (const profileId of Object.keys(rawBindings).sort()) {
     parseProfileId(profileId, 'session bindings.bindings key');
@@ -388,6 +445,20 @@ export function parseSessionBindingsFile(value: unknown): SessionBindingsFileV1 
       binding.uniqueLaunchName,
       `binding "${profileId}"`,
     );
+    if (binding.missionExecutionId !== undefined) {
+      const owner = missionExecutionOwners.get(
+        binding.missionExecutionId,
+      );
+      if (owner !== undefined) {
+        throw new Error(
+          `Mission execution "${binding.missionExecutionId}" belongs to both ${owner} and binding "${profileId}"`,
+        );
+      }
+      missionExecutionOwners.set(
+        binding.missionExecutionId,
+        `binding "${profileId}"`,
+      );
+    }
     bindings[profileId] = binding;
   }
 
@@ -408,6 +479,20 @@ export function parseSessionBindingsFile(value: unknown): SessionBindingsFileV1 
       pending.uniqueLaunchName,
       `pending launch "${profileId}"`,
     );
+    if (pending.missionExecutionId !== undefined) {
+      const owner = missionExecutionOwners.get(
+        pending.missionExecutionId,
+      );
+      if (owner !== undefined) {
+        throw new Error(
+          `Mission execution "${pending.missionExecutionId}" belongs to both ${owner} and pending launch "${profileId}"`,
+        );
+      }
+      missionExecutionOwners.set(
+        pending.missionExecutionId,
+        `pending launch "${profileId}"`,
+      );
+    }
     pendingLaunches[profileId] = pending;
   }
 

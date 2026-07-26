@@ -104,6 +104,11 @@
         key: slot.member.key,
         label: slot.member.label,
         mode: slotMode(slot),
+        missionBadge:
+          window.CouncilMissionViewModel?.assignmentBadge(
+            options.missionState,
+            slot.member.key,
+          ),
       })),
     };
   }

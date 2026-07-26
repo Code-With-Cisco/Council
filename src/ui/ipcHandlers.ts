@@ -1,5 +1,6 @@
 import type { CliResult } from '../integration/types.js';
 import type { AgentSupervisorPort } from '../supervisor/contracts.js';
+import type { MissionUiController } from './missionUi.js';
 import {
   IPC_CHANNELS,
   type UiFailure,
@@ -8,7 +9,15 @@ import {
 } from './ipc.js';
 import {
   validateCouncilQuestion,
+  validateCreateCandidateInput,
+  validateCreateMissionInput,
   validateDefinitionFingerprint,
+  validateMissionDigest,
+  validatePreviewIntegrationInput,
+  validatePreviewSquadInput,
+  validateRecordGateInput,
+  validateRecordHandoffInput,
+  validateRetryMissionExecutionInput,
   validateProfileId,
   validateReplyText,
 } from './ipcValidation.js';
@@ -25,9 +34,12 @@ export interface CouncilIpcDependencies {
   readonly getState: () => UiState | undefined;
   readonly chooseWorkspace: () => Promise<UiResult<UiState>>;
   readonly getSupervisor: () => AgentSupervisorPort | undefined;
+  readonly getMissionController: () => MissionUiController | undefined;
   /** True only while the current definition projection is authoritative. */
   readonly canLaunchDefinitions: () => boolean;
   readonly confirmStartNew: () => Promise<boolean>;
+  readonly confirmStartSquad: () => Promise<boolean>;
+  readonly confirmMissionIntegration: () => Promise<boolean>;
   readonly afterAction: <T>(result: CliResult<T>) => Promise<UiResult<T>>;
 }
 
@@ -37,6 +49,26 @@ function unavailable(message: string): UiFailure {
 
 function profileIdOrFailure(value: unknown): string | UiFailure {
   return validateProfileId(value) ?? unavailable('Invalid opaque profile ID.');
+}
+
+async function runMissionAction<T>(
+  dependencies: CouncilIpcDependencies,
+  action: (controller: MissionUiController) => Promise<T>,
+): Promise<UiResult<T>> {
+  const controller = dependencies.getMissionController();
+  if (controller === undefined) {
+    return unavailable('Mission coordination is unavailable.');
+  }
+  try {
+    return { ok: true, value: await action(controller) };
+  } catch {
+    // Unexpected privileged errors can contain repository paths, provider
+    // payloads, or process details. Expected blockers belong in the typed
+    // preview/state projection instead of crossing this boundary as raw text.
+    return unavailable(
+      'Mission action could not be completed. Refresh Mission state for current blockers.',
+    );
+  }
 }
 
 /**
@@ -208,4 +240,161 @@ export function registerCouncilIpc(
       ),
     );
   });
+
+  registrar.handle(IPC_CHANNELS.getMissionState, async (event) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.getState(),
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.createMission, async (event, rawInput) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const input = validateCreateMissionInput(rawInput);
+    if (input === undefined) {
+      return unavailable('Invalid bounded Mission draft.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.createMission(input),
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.previewSquad, async (event, rawInput) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const input = validatePreviewSquadInput(rawInput);
+    if (input === undefined) {
+      return unavailable('Invalid opaque squad preview request.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.previewSquad(input),
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.startSquad, async (event, rawDigest) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const digest = validateMissionDigest(rawDigest);
+    if (digest === undefined) {
+      return unavailable('Invalid squad preview fingerprint.');
+    }
+    if (!(await dependencies.confirmStartSquad())) {
+      return unavailable('Start Squad was canceled.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.startSquad(digest),
+    );
+  });
+
+  registrar.handle(
+    IPC_CHANNELS.retryMissionExecution,
+    async (event, rawInput) => {
+      if (!dependencies.isTrusted(event)) {
+        return unavailable('Untrusted IPC sender.');
+      }
+      const input = validateRetryMissionExecutionInput(rawInput);
+      if (input === undefined) {
+        return unavailable('Invalid blocked Mission execution retry.');
+      }
+      return runMissionAction(dependencies, (controller) =>
+        controller.retryBlockedExecution(input),
+      );
+    },
+  );
+
+  registrar.handle(IPC_CHANNELS.recordHandoff, async (event, rawInput) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const input = validateRecordHandoffInput(rawInput);
+    if (input === undefined) {
+      return unavailable('Invalid exact handoff evidence.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.recordHandoff(input),
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.createCandidate, async (event, rawInput) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const input = validateCreateCandidateInput(rawInput);
+    if (input === undefined) {
+      return unavailable('Invalid ordered handoff selection.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.createCandidate(input),
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.recordGate, async (event, rawInput) => {
+    if (!dependencies.isTrusted(event)) {
+      return unavailable('Untrusted IPC sender.');
+    }
+    const input = validateRecordGateInput(rawInput);
+    if (input === undefined) {
+      return unavailable('Invalid bounded gate request.');
+    }
+    return runMissionAction(dependencies, (controller) =>
+      controller.recordGate(input),
+    );
+  });
+
+  registrar.handle(
+    IPC_CHANNELS.previewIntegration,
+    async (event, rawInput) => {
+      if (!dependencies.isTrusted(event)) {
+        return unavailable('Untrusted IPC sender.');
+      }
+      const input = validatePreviewIntegrationInput(rawInput);
+      if (input === undefined) {
+        return unavailable('Invalid opaque integration preview request.');
+      }
+      return runMissionAction(dependencies, (controller) =>
+        controller.previewIntegration(input),
+      );
+    },
+  );
+
+  registrar.handle(
+    IPC_CHANNELS.approveIntegration,
+    async (event, rawDigest) => {
+      if (!dependencies.isTrusted(event)) {
+        return unavailable('Untrusted IPC sender.');
+      }
+      const digest = validateMissionDigest(rawDigest);
+      if (digest === undefined) {
+        return unavailable('Invalid integration approval fingerprint.');
+      }
+      if (!(await dependencies.confirmMissionIntegration())) {
+        return unavailable('Integration approval was canceled.');
+      }
+      return runMissionAction(dependencies, (controller) =>
+        controller.approveIntegration(digest),
+      );
+    },
+  );
+
+  registrar.handle(
+    IPC_CHANNELS.rejectIntegration,
+    async (event, rawDigest) => {
+      if (!dependencies.isTrusted(event)) {
+        return unavailable('Untrusted IPC sender.');
+      }
+      const digest = validateMissionDigest(rawDigest);
+      if (digest === undefined) {
+        return unavailable('Invalid integration approval fingerprint.');
+      }
+      return runMissionAction(dependencies, (controller) =>
+        controller.rejectIntegration(digest),
+      );
+    },
+  );
 }

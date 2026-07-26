@@ -14,6 +14,7 @@ import { detectUnknownAgentWarning } from '../integration/cli/errors.js';
 import type { AgentProviderAdapter } from '../providers/contracts.js';
 import {
   resolveExactBindingSession,
+  type MissionBindingAccessMode,
   type PendingLaunchRecord,
   type SessionBindingRecord,
   type SessionBindingStore,
@@ -49,6 +50,13 @@ export interface SafeLaunchCoordinatorOptions {
   readonly verifyCapability: () => Promise<CliResult<unknown>>;
   /** Refreshes and publishes the authoritative supervisor snapshot. */
   readonly refresh: () => Promise<readonly Session[]>;
+  /**
+   * Privileged authorization for a launch directory outside the trusted source
+   * checkout, such as an exact Council-owned Mission worktree lease.
+   */
+  readonly authorizeLaunchCwd?:
+    | ((profileId: string, canonicalCwd: string) => Promise<boolean>)
+    | undefined;
   readonly now?: (() => Date) | undefined;
   readonly uniqueId?: (() => string) | undefined;
   readonly platform?: NodeJS.Platform | undefined;
@@ -59,7 +67,13 @@ export interface StartProfileOptions {
   /** Fail instead of returning an existing binding as a successful start. */
   readonly rejectExisting?: boolean | undefined;
   readonly promptOverride?: string | undefined;
+  /** Privileged main-process path; never accepted from renderer IPC. */
+  readonly launchCwd?: string | undefined;
   readonly expectedDefinitionFingerprint?: string | undefined;
+  /** Privileged Mission-only override; never accepted from renderer IPC. */
+  readonly permissionModeOverride?: 'plan' | undefined;
+  readonly missionExecutionId?: string | undefined;
+  readonly missionAccessMode?: MissionBindingAccessMode | undefined;
 }
 
 export interface ExactBoundSessionActionOptions<T> {
@@ -150,6 +164,30 @@ function bindingIdentityCandidateCount(
   ).length;
 }
 
+function matchesMissionLaunchIdentity(
+  record: SessionBindingRecord | PendingLaunchRecord,
+  profileId: string,
+  options: StartProfileOptions,
+  platform: NodeJS.Platform,
+): boolean {
+  return (
+    options.missionExecutionId !== undefined &&
+    options.missionAccessMode !== undefined &&
+    options.expectedDefinitionFingerprint !== undefined &&
+    options.launchCwd !== undefined &&
+    record.profileId === profileId &&
+    record.missionExecutionId === options.missionExecutionId &&
+    record.missionAccessMode === options.missionAccessMode &&
+    record.definitionFingerprint ===
+      options.expectedDefinitionFingerprint &&
+    samePath(
+      record.requestedCanonicalCwd,
+      options.launchCwd,
+      platform,
+    )
+  );
+}
+
 /**
  * Serializes and journals all starts for one profile. It owns no provider
  * process itself; closing Council drains transactions and never deletes jobs.
@@ -176,6 +214,16 @@ export class SafeLaunchCoordinator {
   ): Promise<CliResult<StartSessionOutcome>> {
     if (this.closing) {
       return Promise.resolve(failure('Council is shutting down; no new launch was started.'));
+    }
+    if (
+      (options.missionExecutionId === undefined) !==
+      (options.missionAccessMode === undefined)
+    ) {
+      return Promise.resolve(
+        failure(
+          'Mission launch identity requires both execution ID and access mode.',
+        ),
+      );
     }
     const existing = this.starts.get(profileId);
     if (existing !== undefined) return existing;
@@ -583,6 +631,23 @@ export class SafeLaunchCoordinator {
         ? undefined
         : resolveExactBindingSession(existingBinding, listed.value);
     if (existingBinding !== undefined && startOptions.replaceExisting !== true) {
+      const missionStart =
+        startOptions.missionExecutionId !== undefined;
+      const exactMissionBinding = matchesMissionLaunchIdentity(
+        existingBinding,
+        profileId,
+        startOptions,
+        this.platform,
+      );
+      if (
+        (missionStart && !exactMissionBinding) ||
+        (!missionStart &&
+          existingBinding.missionExecutionId !== undefined)
+      ) {
+        return failure(
+          'The exact profile binding belongs to a different launch authority.',
+        );
+      }
       if (exactSession === undefined) {
         return failure(
           'The exact bound session is missing. Use Clear binding before starting another conversation.',
@@ -590,6 +655,18 @@ export class SafeLaunchCoordinator {
       }
       if (isActive(exactSession)) {
         if (startOptions.rejectExisting === true) {
+          if (exactMissionBinding) {
+            return {
+              ok: true,
+              value: outcomeForBinding(
+                existingBinding,
+                exactSession,
+              ),
+              raw: '',
+              argv: [],
+              durationMs: 0,
+            };
+          }
           return failure(
             'This profile already has an active exact conversation. Confirm Start new before replacing it.',
           );
@@ -612,6 +689,22 @@ export class SafeLaunchCoordinator {
         pending.workspaceId !== this.options.workspace.id
       ) {
         return failure('The pending launch belongs to a different workspace.');
+      }
+      const missionStart =
+        startOptions.missionExecutionId !== undefined;
+      if (
+        (missionStart &&
+          !matchesMissionLaunchIdentity(
+            pending,
+            profileId,
+            startOptions,
+            this.platform,
+          )) ||
+        (!missionStart && pending.missionExecutionId !== undefined)
+      ) {
+        return failure(
+          'The pending launch belongs to a different Mission execution.',
+        );
       }
       if (this.isRejectedSubstitution(pending)) {
         const cleanup = await this.cleanupRejectedSubstitution(
@@ -637,12 +730,26 @@ export class SafeLaunchCoordinator {
 
     let canonicalCwd: string;
     try {
-      canonicalCwd = await canonicalDirectory(profile.cwd);
+      canonicalCwd = await canonicalDirectory(
+        startOptions.launchCwd ?? profile.cwd,
+      );
     } catch (error) {
       return failure(error instanceof Error ? error.message : String(error));
     }
-    if (!samePath(canonicalCwd, this.options.workspace.canonicalPath, this.platform)) {
-      return failure('The profile launch directory is outside the active canonical workspace.');
+    if (
+      !samePath(
+        canonicalCwd,
+        this.options.workspace.canonicalPath,
+        this.platform,
+      ) &&
+      !(
+        this.options.authorizeLaunchCwd !== undefined &&
+        (await this.options.authorizeLaunchCwd(profileId, canonicalCwd))
+      )
+    ) {
+      return failure(
+        'The profile launch directory is neither the active workspace nor an exact authorized Council lease.',
+      );
     }
 
     const definition = await this.options.resolveDefinition(profile);
@@ -735,6 +842,14 @@ export class SafeLaunchCoordinator {
       catalogId: definition.catalogId,
       definitionFingerprint: definition.fingerprint,
       requestedCanonicalCwd: canonicalCwd,
+      ...(startOptions.missionExecutionId === undefined
+        ? {}
+        : {
+            missionExecutionId:
+              startOptions.missionExecutionId,
+            missionAccessMode:
+              startOptions.missionAccessMode!,
+          }),
       createdAt,
     };
     try {
@@ -802,7 +917,9 @@ export class SafeLaunchCoordinator {
       model: launchProfile.model,
       effort: launchProfile.effort,
       permissionMode:
-        launchProfile.permissionMode ?? launchDefinition.permissionMode,
+        startOptions.permissionModeOverride ??
+        launchProfile.permissionMode ??
+        launchDefinition.permissionMode,
     });
 
     if (!result.ok) {
@@ -945,6 +1062,14 @@ export class SafeLaunchCoordinator {
       catalogId: definition.catalogId,
       definitionFingerprint: definition.fingerprint,
       requestedCanonicalCwd: canonicalCwd,
+      ...(startOptions.missionExecutionId === undefined
+        ? {}
+        : {
+            missionExecutionId:
+              startOptions.missionExecutionId,
+            missionAccessMode:
+              startOptions.missionAccessMode!,
+          }),
       ...(actualCanonicalCwd === undefined ? {} : { actualCanonicalCwd }),
       createdAt,
       lastConfirmedAt: this.now().toISOString(),
@@ -1020,6 +1145,12 @@ export class SafeLaunchCoordinator {
       catalogId: pending.catalogId,
       definitionFingerprint: pending.definitionFingerprint,
       requestedCanonicalCwd: pending.requestedCanonicalCwd,
+      ...(pending.missionExecutionId === undefined
+        ? {}
+        : {
+            missionExecutionId: pending.missionExecutionId,
+            missionAccessMode: pending.missionAccessMode!,
+          }),
       ...(session.cwd === undefined ? {} : { actualCanonicalCwd: session.cwd }),
       createdAt: pending.createdAt,
       lastConfirmedAt: this.now().toISOString(),

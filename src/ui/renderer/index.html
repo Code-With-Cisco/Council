@@ -46,6 +46,7 @@
       <nav class="tabs" aria-label="Primary views">
         <button class="tab is-active" data-view="office">Office</button>
         <button class="tab" data-view="squad">Agents</button>
+        <button class="tab" data-view="missions">Missions</button>
         <button class="tab" data-view="council">Council</button>
         <button class="tab" data-view="diagnostics">Diagnostics</button>
       </nav>
@@ -127,6 +128,156 @@
           </div>
         </section>
 
+        <section id="view-missions" class="view">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">COUNCIL-OWNED ORCHESTRATION</p>
+              <h2>Missions</h2>
+            </div>
+            <span id="mission-revision" class="mono-label">LEDGER UNAVAILABLE</span>
+          </div>
+          <div id="mission-provider-status" class="provider-status-grid"
+            aria-label="Mission provider status"></div>
+          <div class="mission-layout">
+            <div class="mission-compose-column">
+              <form id="mission-form" class="mission-composer">
+                <p class="eyebrow">START SQUAD</p>
+                <h3>Compose a mission</h3>
+                <label for="mission-title">Mission title</label>
+                <input id="mission-title" maxlength="512" required
+                  placeholder="Ship the trustworthy session layer" />
+                <label for="mission-objective">Objective</label>
+                <textarea id="mission-objective" rows="6" maxlength="20000" required
+                  placeholder="Describe the outcome and constraints."></textarea>
+                <fieldset class="mission-role-fieldset">
+                  <legend>Roles, providers, and access</legend>
+                  <p class="muted">
+                    Provider and write access are reviewed again in the privileged preview.
+                  </p>
+                  <div id="mission-role-options" class="mission-role-options"></div>
+                  <div class="mission-gate-assignment-options">
+                    <label class="mission-role-control" for="mission-test-profile">
+                      <span>Test assignment</span>
+                      <select id="mission-test-profile" required></select>
+                    </label>
+                    <label class="mission-role-control" for="mission-review-profile">
+                      <span>Review assignment</span>
+                      <select id="mission-review-profile" required></select>
+                    </label>
+                  </div>
+                  <p class="muted">
+                    Choose two distinct read-only roles. Their exact Mission execution IDs are
+                    allocated only after confirmation.
+                  </p>
+                </fieldset>
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit">
+                    Create draft &amp; preview
+                  </button>
+                  <span id="mission-feedback" class="muted" role="status"></span>
+                </div>
+              </form>
+
+              <section id="squad-preview" class="mission-preview" hidden>
+                <p class="eyebrow">PRIVILEGED SQUAD PREVIEW</p>
+                <h3>Review exact assignments</h3>
+                <dl id="squad-preview-meta" class="detail-meta"></dl>
+                <ul id="squad-preview-participants" class="mission-evidence-list"></ul>
+                <h4>Independent gate assignments</h4>
+                <ul id="squad-preview-gates" class="mission-evidence-list"></ul>
+                <ul id="squad-preview-blockers" class="mission-blockers"></ul>
+                <div class="form-actions">
+                  <button id="start-squad-button" class="button button-primary" type="button">
+                    Confirm Start Squad
+                  </button>
+                  <span class="muted">The displayed fingerprint is single-use.</span>
+                </div>
+              </section>
+
+              <section id="handoff-panel" class="mission-preview" hidden>
+                <p class="eyebrow">EXACT COMMIT HANDOFF</p>
+                <h3>Verify a write assignment</h3>
+                <p id="handoff-target" class="muted"></p>
+                <form id="handoff-form">
+                  <label for="handoff-commit">Full commit SHA</label>
+                  <input id="handoff-commit" minlength="40" maxlength="64"
+                    autocomplete="off" spellcheck="false" required />
+                  <label for="handoff-tree">Full tree SHA</label>
+                  <input id="handoff-tree" minlength="40" maxlength="64"
+                    autocomplete="off" spellcheck="false" required />
+                  <label for="handoff-summary">Bounded handoff summary</label>
+                  <textarea id="handoff-summary" maxlength="8000" required></textarea>
+                  <label for="handoff-evidence">Evidence (one item per line)</label>
+                  <textarea id="handoff-evidence" maxlength="64000"></textarea>
+                  <label for="handoff-risks">Risks (one item per line)</label>
+                  <textarea id="handoff-risks" maxlength="64000"></textarea>
+                  <div class="form-actions">
+                    <button class="button button-primary" type="submit">
+                      Verify &amp; record handoff
+                    </button>
+                    <button id="cancel-handoff-button" class="button"
+                      type="button">Cancel</button>
+                  </div>
+                </form>
+              </section>
+
+              <section id="gate-panel" class="mission-preview" hidden>
+                <p class="eyebrow">INDEPENDENT GATE EVIDENCE</p>
+                <h3>Run an exact candidate gate</h3>
+                <dl id="gate-candidate-meta" class="detail-meta"></dl>
+                <form id="gate-form">
+                  <div class="gate-form-grid">
+                    <label>Gate
+                      <select id="gate-kind">
+                        <option value="test">Test</option>
+                        <option value="review">Review</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label for="gate-executor">Independent executor</label>
+                  <select id="gate-executor" required></select>
+                  <label for="gate-command-ids">Allowlisted command IDs (one per line; Test required)</label>
+                  <textarea id="gate-command-ids" maxlength="4128"></textarea>
+                  <label for="gate-policy-fingerprint">Displayed gate-policy fingerprint</label>
+                  <input id="gate-policy-fingerprint" minlength="64" maxlength="64"
+                    autocomplete="off" spellcheck="false" required />
+                  <div class="form-actions">
+                    <button class="button button-primary" type="submit">
+                      Run gate &amp; record result
+                    </button>
+                    <button id="cancel-gate-button" class="button"
+                      type="button">Cancel</button>
+                  </div>
+                </form>
+              </section>
+
+              <section id="integration-preview" class="mission-preview" hidden>
+                <p class="eyebrow">INTEGRATION APPROVAL</p>
+                <h3>Exact reviewed commit</h3>
+                <dl id="integration-preview-meta" class="detail-meta"></dl>
+                <div class="form-actions">
+                  <button id="approve-integration-button"
+                    class="button button-primary" type="button">Approve integration</button>
+                  <button id="reject-integration-button"
+                    class="button button-danger" type="button">Reject</button>
+                </div>
+              </section>
+            </div>
+
+            <section class="mission-timeline-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">DURABLE LEDGER</p>
+                  <h3>Mission timeline</h3>
+                </div>
+                <button id="refresh-missions-button" class="button button-compact"
+                  type="button">Refresh</button>
+              </div>
+              <div id="mission-list" class="mission-list" aria-live="polite"></div>
+            </section>
+          </div>
+        </section>
+
         <section id="view-council" class="view">
           <div class="council-card">
             <p class="eyebrow">SIX-PERSPECTIVE DECISION PIPELINE</p>
@@ -176,6 +327,7 @@
         <span>macOS development · Windows production</span>
       </footer>
     </div>
+    <script src="./mission-view-model.js"></script>
     <script src="./scene-view-model.js"></script>
     <script src="./pixel-office.js"></script>
     <script src="./renderer.js"></script>

@@ -1,6 +1,10 @@
 export type CouncilProviderId = 'claude-code' | 'codex';
 export type CouncilAccessMode = 'read-only' | 'workspace-write';
 export type MissionApprovalDecision = 'accept' | 'decline' | 'cancel';
+export type MissionInitialTaskDispatchState =
+  | 'not-started'
+  | 'pending'
+  | 'started';
 
 export interface MissionProviderStatus {
   readonly providerId: CouncilProviderId;
@@ -30,6 +34,8 @@ export interface MissionConversation {
   readonly providerConversationId: string;
   readonly assignmentId: string;
   readonly resumed: boolean;
+  readonly initialTaskDispatchState: MissionInitialTaskDispatchState;
+  readonly initialTaskTurnId?: string | undefined;
 }
 
 export interface MissionTurn {

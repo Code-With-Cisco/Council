@@ -297,6 +297,11 @@ export interface SessionBindingRef {
   readonly catalogId: string;
   readonly definitionFingerprint: string;
   readonly requestedCanonicalCwd: string;
+  readonly missionExecutionId?: string | undefined;
+  readonly missionAccessMode?:
+    | 'read-only'
+    | 'workspace-write'
+    | undefined;
   readonly actualCanonicalCwd?: string | undefined;
   readonly createdAt: string;
   readonly lastConfirmedAt: string;

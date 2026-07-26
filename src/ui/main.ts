@@ -9,6 +9,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import { createHash } from 'node:crypto';
+import { mkdir, readFile, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { watch, type FSWatcher } from 'chokidar';
@@ -20,6 +21,7 @@ import {
 import type { CliResult } from '../integration/types.js';
 import { ClaudeClient } from '../integration/client.js';
 import { ClaudeProviderAdapter } from '../integration/claudeProviderAdapter.js';
+import { NodeGitPort } from '../git/index.js';
 import { AgentDefinitionWatcher } from '../integration/fs/agentWatch.js';
 import { ClaudePaths } from '../integration/paths.js';
 import { runLaunchPreflight, type LaunchPreflight } from '../integration/preflight.js';
@@ -39,6 +41,25 @@ import {
   type ResolvedAgentCatalog,
   type ResolvedProfiles,
 } from '../supervisor/index.js';
+import { fingerprintAgentDefinition } from '../supervisor/catalog.js';
+import {
+  CodexAppServerClient,
+  CodexMissionProviderAdapter,
+  CodexThreadBindingStore,
+  locateCodex,
+} from '../providers/codex/index.js';
+import { MissionLedgerStore } from '../missions/ledger.js';
+import {
+  MissionCoordinator,
+} from '../missions/coordinator.js';
+import { MissionGitAdapter } from '../missions/gitAdapter.js';
+import { MissionProviderRouter } from '../missions/providerRouter.js';
+import { MissionWorktreeAdapter } from '../missions/worktreeAdapter.js';
+import { GateRunner } from '../missions/gateRunner.js';
+import {
+  WorktreeLeaseManager,
+  WorktreeLeaseStore,
+} from '../orchestration/worktrees/index.js';
 import { acquireSingleInstance } from './singleInstance.js';
 import {
   IPC_CHANNELS,
@@ -49,6 +70,8 @@ import {
   type UiWorkspaceState,
 } from './ipc.js';
 import { registerCouncilIpc } from './ipcHandlers.js';
+import type { MissionUiController } from './missionUi.js';
+import { PrivilegedMissionUiController } from './missionController.js';
 import {
   SerializedLifecycle,
   type SerializedLifecycleContext,
@@ -64,6 +87,8 @@ app.setName(APP_NAME);
 let mainWindow: BrowserWindow | undefined;
 let supervisor: AgentSupervisorPort | undefined;
 let claudeSupervisor: ClaudeCodeAgentSupervisor | undefined;
+let missionUiController: MissionUiController | undefined;
+let missionWorktrees: WorktreeLeaseManager | undefined;
 let definitionWatcher: AgentDefinitionWatcher | undefined;
 let profileWatcher: FSWatcher | undefined;
 let bindingWatcher: FSWatcher | undefined;
@@ -75,6 +100,11 @@ const applicationLifecycle = new SerializedLifecycle();
 let catalogRefresh: Promise<void> = Promise.resolve();
 let appConfigStore: AppConfigStore;
 let bindingStore: SessionBindingStore;
+let codexThreadBindings: CodexThreadBindingStore;
+let codexClient: CodexAppServerClient | undefined;
+let codexMissionProvider: CodexMissionProviderAdapter | undefined;
+let missionLedgerStore: MissionLedgerStore;
+let worktreeLeaseStore: WorktreeLeaseStore;
 let claudePaths: ClaudePaths;
 let profileStore: RosterConfigStore | undefined;
 let savedRoster: RosterConfigStoreLoad | undefined;
@@ -118,6 +148,22 @@ function sameCanonicalPath(left: string, right: string): boolean {
       : normalized;
   };
   return normalize(left) === normalize(right);
+}
+
+function isInsideCanonicalRoot(root: string, candidate: string): boolean {
+  const normalize = (value: string): string => {
+    const normalized = path.normalize(value);
+    return process.platform === 'win32'
+      ? normalized.toLocaleLowerCase('en-US')
+      : normalized;
+  };
+  const relative = path.relative(normalize(root), normalize(candidate));
+  return (
+    relative !== '' &&
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
 }
 
 function profileLoadProblem(
@@ -263,6 +309,11 @@ function publishState(): void {
   mainWindow.webContents.send(IPC_CHANNELS.state, currentState);
 }
 
+function publishMissionState(state: Awaited<ReturnType<MissionUiController['getState']>>): void {
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(IPC_CHANNELS.missionState, state);
+}
+
 function markRuntimeStale(
   source: 'binding' | 'catalog' | 'profile',
   message: string,
@@ -376,6 +427,7 @@ function registerIpc(): void {
       getState: () => currentState,
       chooseWorkspace,
       getSupervisor: () => (supervisorActionsReady ? supervisor : undefined),
+      getMissionController: () => missionUiController,
       canLaunchDefinitions: () =>
         currentState?.capabilities.start === true &&
         currentState.snapshot !== undefined &&
@@ -388,6 +440,34 @@ function registerIpc(): void {
           detail:
             'Council will replace only this profile’s binding after the new session is safely saved.',
           buttons: ['Start new', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        });
+        return confirmation.response === 0;
+      },
+      confirmStartSquad: async () => {
+        const confirmation = await dialog.showMessageBox(mainWindow!, {
+          type: 'question',
+          title: 'Start this squad?',
+          message: 'Start the exact reviewed Mission squad?',
+          detail:
+            'Council will revalidate the preview fingerprint before creating provider conversations or worktree leases.',
+          buttons: ['Start squad', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        });
+        return confirmation.response === 0;
+      },
+      confirmMissionIntegration: async () => {
+        const confirmation = await dialog.showMessageBox(mainWindow!, {
+          type: 'warning',
+          title: 'Approve integration?',
+          message: 'Integrate the exact reviewed commit?',
+          detail:
+            'Council will revalidate the target head, Test and Review gates, and single-use preview fingerprint before a fast-forward update.',
+          buttons: ['Approve integration', 'Cancel'],
           defaultId: 1,
           cancelId: 1,
           noLink: true,
@@ -517,6 +597,9 @@ async function chooseWorkspace(): Promise<UiResult<UiState>> {
 
 async function disposeActiveRuntime(): Promise<void> {
   supervisorActionsReady = false;
+  missionUiController = undefined;
+  const activeMissionWorktrees = missionWorktrees;
+  missionWorktrees = undefined;
   activeConfigurationSignature = undefined;
   controllerProblems.clear();
   const watcher = definitionWatcher;
@@ -536,6 +619,7 @@ async function disposeActiveRuntime(): Promise<void> {
     watcher?.stop() ?? Promise.resolve(),
     savedProfileWatcher?.close() ?? Promise.resolve(),
     savedBindingWatcher?.close() ?? Promise.resolve(),
+    activeMissionWorktrees?.shutdown() ?? Promise.resolve(),
   ]);
   for (const result of watcherResults) {
     if (result.status === 'rejected') failures.push(result.reason);
@@ -663,6 +747,205 @@ async function activateWorkspace(
     );
   }
 
+  const userData = app.getPath('userData');
+  const missionWorktreeRoot = path.join(userData, 'mission-worktrees');
+  const gateWorktreeRoot = path.join(userData, 'mission-gate-worktrees');
+  const emptyHooksPath = path.join(userData, 'council-empty-git-hooks');
+  await Promise.all([
+    mkdir(missionWorktreeRoot, { recursive: true }),
+    mkdir(gateWorktreeRoot, { recursive: true }),
+    mkdir(emptyHooksPath, { recursive: true }),
+  ]);
+  const [
+    canonicalMissionWorktreeRoot,
+    canonicalGateWorktreeRoot,
+    canonicalEmptyHooksPath,
+  ] = await Promise.all([
+    realpath(missionWorktreeRoot),
+    realpath(gateWorktreeRoot),
+    realpath(emptyHooksPath),
+  ]);
+  if (await abandonActivation(generation, context)) return;
+  const missionGitProcess = new NodeGitPort({
+    executable:
+      preflight.git.executable ??
+      (process.platform === 'win32' ? 'git.exe' : 'git'),
+    hooksPath: canonicalEmptyHooksPath,
+  });
+  const createdWorktreeManager = new WorktreeLeaseManager({
+    git: missionGitProcess,
+    store: worktreeLeaseStore,
+    workspace: {
+      id: workspace.id,
+      canonicalPath: workspace.canonicalPath,
+      trusted: workspace.trusted,
+    },
+    worktreeRoot: canonicalMissionWorktreeRoot,
+  });
+  missionWorktrees = createdWorktreeManager;
+  try {
+    const leaseState = await worktreeLeaseStore.reload();
+    if (leaseState.problem !== undefined) {
+      throw new Error(leaseState.problem.message);
+    }
+    const recoverableLeases = Object.values(leaseState.data.leases)
+      .filter(
+        (lease) =>
+          lease.workspaceId === workspace.id && lease.state !== 'removed',
+      )
+      .sort((left, right) => left.leaseId.localeCompare(right.leaseId));
+    for (const lease of recoverableLeases) {
+      const reconciled = await createdWorktreeManager.reconcile(lease.leaseId);
+      if (
+        reconciled.state === 'blocked' ||
+        reconciled.state === 'provisioning' ||
+        reconciled.state === 'cleanup-pending'
+      ) {
+        startupMessages.push(
+          `Mission worktree lease ${reconciled.leaseId} requires explicit recovery (${reconciled.state}).`,
+        );
+      }
+    }
+  } catch {
+    startupMessages.push(
+      'Council could not reconcile every saved Mission worktree lease. Existing worktrees were preserved and affected actions remain blocked.',
+    );
+  }
+  const missionWorktreeAdapter = new MissionWorktreeAdapter({
+    git: missionGitProcess,
+    manager: createdWorktreeManager,
+    store: worktreeLeaseStore,
+    workspace: {
+      id: workspace.id,
+      canonicalPath: workspace.canonicalPath,
+      trusted: workspace.trusted,
+    },
+    worktreeRoot: canonicalMissionWorktreeRoot,
+  });
+  const missionGitAdapter = new MissionGitAdapter({
+    git: missionGitProcess,
+    leases: createdWorktreeManager,
+    workspace: {
+      id: workspace.id,
+      canonicalPath: workspace.canonicalPath,
+      trusted: workspace.trusted,
+    },
+  });
+  const nodeExecutable = preflight.node.executable ?? process.execPath;
+  const gateRunner = new GateRunner({
+    git: missionGitProcess,
+    store: worktreeLeaseStore,
+    workspace: {
+      id: workspace.id,
+      canonicalPath: workspace.canonicalPath,
+      trusted: workspace.trusted,
+    },
+    gateWorktreeRoot: canonicalGateWorktreeRoot,
+    safeEnv: {
+      ELECTRON_RUN_AS_NODE: '1',
+      NODE_ENV: 'test',
+    },
+    policy: {
+      commands: [
+        {
+          id: 'project-tests',
+          executable: nodeExecutable,
+          argv: [
+            path.join(
+              workspace.canonicalPath,
+              'node_modules',
+              'vitest',
+              'vitest.mjs',
+            ),
+            'run',
+          ],
+        },
+        {
+          id: 'project-typecheck',
+          executable: nodeExecutable,
+          argv: [
+            path.join(
+              workspace.canonicalPath,
+              'node_modules',
+              'typescript',
+              'bin',
+              'tsc',
+            ),
+            '-p',
+            'tsconfig.json',
+            '--noEmit',
+          ],
+        },
+      ],
+      testCommandIds: ['project-tests'],
+      reviewCommandIds: ['project-typecheck'],
+    },
+  });
+  try {
+    await gateRunner.reconcile();
+  } catch (error) {
+    startupMessages.push(
+      `Detached gate recovery needs attention: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  try {
+    const leaseState = await worktreeLeaseStore.reload();
+    if (leaseState.problem !== undefined) {
+      throw new Error(leaseState.problem.message);
+    }
+    const knownPaths = [
+      ...Object.values(leaseState.data.leases)
+        .filter((lease) => lease.workspaceId === workspace.id)
+        .map((lease) => lease.checkoutPath),
+      ...Object.values(leaseState.data.gateRuns)
+        .filter((run) => run.workspaceId === workspace.id)
+        .map((run) => run.checkoutPath),
+    ];
+    const repository = await missionGitProcess.inspectRepository(
+      workspace.canonicalPath,
+    );
+    const registered = await missionGitProcess.listWorktrees(
+      repository.repositoryRoot,
+    );
+    for (const entry of registered) {
+      let canonicalPath: string;
+      try {
+        canonicalPath = await realpath(entry.path);
+      } catch {
+        continue;
+      }
+      if (
+        !isInsideCanonicalRoot(
+          canonicalMissionWorktreeRoot,
+          canonicalPath,
+        ) &&
+        !isInsideCanonicalRoot(canonicalGateWorktreeRoot, canonicalPath)
+      ) {
+        continue;
+      }
+      if (
+        knownPaths.some((knownPath) =>
+          sameCanonicalPath(knownPath, canonicalPath),
+        )
+      ) {
+        continue;
+      }
+      const orphanId = createHash('sha256')
+        .update(canonicalPath)
+        .digest('hex')
+        .slice(0, 16);
+      startupMessages.push(
+        `Orphaned Council worktree ${orphanId} is registered without a valid lease. It was preserved and not adopted.`,
+      );
+    }
+  } catch {
+    startupMessages.push(
+      'Council could not complete the read-only orphan worktree scan. No worktree was adopted or deleted.',
+    );
+  }
+
   const initialSnapshot = catalogOnlySnapshot(profiles, catalog, preflight);
   currentState = {
     workspace: readyWorkspaceState(workspace, isDevelopmentOverride),
@@ -700,6 +983,8 @@ async function activateWorkspace(
       validations: profiles.validations,
       catalogProblems: profiles.catalogProblems,
       councilProfileId: profiles.councilProfileId,
+      authorizeMissionLaunchCwd: (profileId, canonicalCwd) =>
+        missionWorktreeAdapter.authorizesLaunch(profileId, canonicalCwd),
       onSnapshot: (snapshot) => {
         if (isActivationCurrent(generation, context)) publishSnapshot(snapshot);
       },
@@ -755,6 +1040,164 @@ async function activateWorkspace(
   }
 
   if (await abandonActivation(generation, context)) return;
+  const resolveMissionAssignment = async (request: {
+    readonly missionId: string;
+    readonly taskId: string;
+    readonly profileId: string;
+    readonly expectedDefinitionFingerprint: string;
+  }) => {
+    const member = profiles.config.members.find(
+      (candidate) => candidate.key === request.profileId,
+    );
+    if (
+      member === undefined ||
+      member.workspaceId !== workspace.id ||
+      member.catalogId === undefined
+    ) {
+      throw new Error(
+        'The selected opaque profile is no longer authorized for this workspace.',
+      );
+    }
+    const freshCatalog = await resolveCatalog();
+    const entry = freshCatalog.entries.find(
+      (candidate) => candidate.catalogId === member.catalogId,
+    );
+    if (
+      entry === undefined ||
+      entry.definitionPath === undefined ||
+      entry.fingerprint === undefined
+    ) {
+      throw new Error(
+        entry?.launchability.message ??
+          'The selected role definition is missing or ambiguous.',
+      );
+    }
+    const bytes = await readFile(entry.definitionPath);
+    const fingerprint = fingerprintAgentDefinition(bytes);
+    if (
+      fingerprint !== entry.fingerprint ||
+      fingerprint !== request.expectedDefinitionFingerprint ||
+      member.definitionFingerprint !== request.expectedDefinitionFingerprint
+    ) {
+      throw new Error(
+        'The role definition changed after it was displayed. Review a fresh Mission preview.',
+      );
+    }
+    const roleInstructions = new TextDecoder('utf-8', { fatal: true })
+      .decode(bytes)
+      .replace(/^\uFEFF/, '')
+      .replace(/\r\n?/g, '\n');
+    return {
+      profileId: member.key,
+      definitionFingerprint: fingerprint,
+      roleInstructions,
+      taskPrompt:
+        member.bootPrompt ??
+        `Act as ${member.label}. Complete only the assigned Mission task and report exact evidence.`,
+      ...(member.model ?? entry.metadata?.model) === undefined
+        ? {}
+        : { model: member.model ?? entry.metadata?.model },
+      launchable: entry.launchability.launchable,
+      ...(entry.launchability.message === undefined
+        ? {}
+        : { diagnostic: entry.launchability.message }),
+    };
+  };
+  const missionProviderRouter = new MissionProviderRouter({
+    workspace: {
+      id: workspace.id,
+      canonicalPath: workspace.canonicalPath,
+      trusted: workspace.trusted,
+    },
+    resolveAssignment: resolveMissionAssignment,
+    claude:
+      claudeSupervisor === undefined
+        ? undefined
+        : {
+            launcher: claudeSupervisor,
+            bindings: bindingStore,
+            available: () =>
+              supervisorActionsReady && claudeSupervisor !== undefined,
+            diagnostic: () =>
+              supervisorActionsReady
+                ? undefined
+                : 'Claude Code Mission starts are unavailable until its runtime is ready.',
+          },
+    codex:
+      codexMissionProvider === undefined
+        ? undefined
+        : {
+            adapter: codexMissionProvider,
+            bindings: codexThreadBindings,
+          },
+  });
+  const missionCoordinator = new MissionCoordinator({
+    store: missionLedgerStore,
+    provider: missionProviderRouter,
+    git: missionGitAdapter,
+    worktrees: missionWorktreeAdapter,
+  });
+  try {
+    let recoveryState = await missionLedgerStore.reload();
+    if (recoveryState.problem !== undefined) {
+      throw new Error(recoveryState.problem.message);
+    }
+    const approved = Object.values(recoveryState.data.approvals)
+      .filter(
+        (approval) =>
+          approval.workspaceId === workspace.id &&
+          approval.status === 'approved',
+      )
+      .sort((left, right) => left.id.localeCompare(right.id));
+    for (const approval of approved) {
+      try {
+        await missionCoordinator.resumeApprovedIntegration(
+          approval.id,
+          recoveryState.data.revision,
+        );
+        startupMessages.push(
+          `Recovered approved Mission integration ${approval.id} to its exact reviewed commit.`,
+        );
+        recoveryState = await missionLedgerStore.reload();
+        if (recoveryState.problem !== undefined) {
+          throw new Error(recoveryState.problem.message);
+        }
+      } catch {
+        startupMessages.push(
+          `Approved Mission integration ${approval.id} still requires recovery; no unreviewed target was accepted.`,
+        );
+        recoveryState = await missionLedgerStore.reload();
+        if (recoveryState.problem !== undefined) break;
+      }
+    }
+  } catch {
+    startupMessages.push(
+      'Council could not reconcile approved Mission integrations. Their durable approvals were preserved without accepting repository drift.',
+    );
+  }
+  const createdMissionController = new PrivilegedMissionUiController({
+    store: missionLedgerStore,
+    coordinator: missionCoordinator,
+    providers: missionProviderRouter,
+    gateRunner,
+    workspaceId: workspace.id,
+    publish: (state) => {
+      if (isActivationCurrent(generation, context)) {
+        publishMissionState(state);
+      }
+    },
+  });
+  missionUiController = createdMissionController;
+  if (currentState !== undefined) {
+    currentState = {
+      ...currentState,
+      startupMessages: [...startupMessages],
+    };
+    publishState();
+  }
+  publishMissionState(await createdMissionController.getState());
+
+  if (await abandonActivation(generation, context)) return;
   definitionWatcher = new AgentDefinitionWatcher(catalog.roots.map((root) => root.path));
   definitionWatcher.onError((error) => {
     if (!isActivationCurrent(generation, context) || currentState === undefined) return;
@@ -772,6 +1215,7 @@ async function activateWorkspace(
         pendingLaunches(),
       );
       catalog = refreshedCatalog;
+      profiles = refreshedProfiles;
       controllerProblems.delete('catalog');
       if (claudeSupervisor !== undefined) {
         await claudeSupervisor.updateCatalog(
@@ -964,8 +1408,21 @@ async function initializeApp(context: SerializedLifecycleContext): Promise<void>
   const userData = app.getPath('userData');
   appConfigStore = new AppConfigStore(userData);
   bindingStore = new SessionBindingStore(path.join(userData, 'session-bindings.json'));
+  codexThreadBindings = new CodexThreadBindingStore(userData);
+  missionLedgerStore = new MissionLedgerStore(
+    path.join(userData, 'mission-ledger.json'),
+  );
+  worktreeLeaseStore = new WorktreeLeaseStore(
+    path.join(userData, 'worktree-leases.json'),
+  );
   claudePaths = new ClaudePaths();
-  const [appConfigLoad] = await Promise.all([appConfigStore.load(), bindingStore.load()]);
+  const [appConfigLoad] = await Promise.all([
+    appConfigStore.load(),
+    bindingStore.load(),
+    codexThreadBindings.load(),
+    missionLedgerStore.load(),
+    worktreeLeaseStore.load(),
+  ]);
   if (context.isShuttingDown) return;
   const startupMessages: string[] = [];
   if (appConfigLoad.diagnostic !== undefined) {
@@ -977,6 +1434,49 @@ async function initializeApp(context: SerializedLifecycleContext): Promise<void>
     startupMessages.push(
       `Session bindings were not overwritten: ${bindingStore.problem.message}`,
     );
+  }
+  if (codexThreadBindings.state.problem !== undefined) {
+    startupMessages.push(
+      `Codex thread bindings were not overwritten: ${codexThreadBindings.state.problem.message}`,
+    );
+  }
+  if (missionLedgerStore.problem !== undefined) {
+    startupMessages.push(
+      `Mission ledger was not overwritten: ${missionLedgerStore.problem.message}`,
+    );
+  }
+  if (worktreeLeaseStore.problem !== undefined) {
+    startupMessages.push(
+      `Worktree leases were not overwritten: ${worktreeLeaseStore.problem.message}`,
+    );
+  }
+
+  const locatedCodex = await locateCodex({
+    override: process.env['DECAGRAM_COUNCIL_CODEX_BIN'],
+    resourcesPath: process.resourcesPath,
+  });
+  if (context.isShuttingDown) return;
+  if (locatedCodex === null) {
+    startupMessages.push(
+      'Codex App Server was not found. Claude-only Missions remain available.',
+    );
+  } else {
+    codexClient = new CodexAppServerClient({
+      executable: locatedCodex.executable,
+      clientVersion: app.getVersion(),
+    });
+    codexMissionProvider = new CodexMissionProviderAdapter({
+      client: codexClient,
+      bindings: codexThreadBindings,
+    });
+    const codexStatus = await codexMissionProvider.connect();
+    if (context.isShuttingDown) return;
+    if (!codexStatus.available || !codexStatus.authenticated) {
+      startupMessages.push(
+        codexStatus.diagnostic ??
+          'Codex App Server is unavailable or requires provider-owned sign-in.',
+      );
+    }
   }
 
   currentState = initialState(
@@ -1239,6 +1739,9 @@ app.on('before-quit', (event) => {
       const results = await Promise.allSettled([
         configWatcher?.close() ?? Promise.resolve(),
         disposeActiveRuntime(),
+        codexMissionProvider?.shutdown() ??
+          codexClient?.stop() ??
+          Promise.resolve(),
       ]);
       for (const result of results) {
         if (result.status === 'rejected') failures.push(result.reason);

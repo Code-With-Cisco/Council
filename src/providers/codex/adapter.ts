@@ -87,11 +87,33 @@ function validateAssignment(
   if (!path.isAbsolute(assignment.workspacePath)) {
     return 'Codex assignment workspace must be an absolute privileged path.';
   }
-  if (assignment.roleInstructions.trim() === '') {
-    return 'Codex assignment role instructions are empty.';
+  if (
+    assignment.roleInstructions.trim() === '' ||
+    assignment.roleInstructions.length > DEFAULT_MAX_PROMPT_CHARS ||
+    /[\u0000\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(
+      assignment.roleInstructions,
+    )
+  ) {
+    return 'Codex assignment role instructions are empty, oversized, or contain unsafe control bytes.';
   }
   if (!/^[a-f0-9]{64}$/.test(assignment.requestFingerprint)) {
     return 'Codex assignment fingerprint is invalid.';
+  }
+  if (
+    fingerprintCodexAssignment({
+      workspaceId: assignment.workspaceId,
+      workspacePath: assignment.workspacePath,
+      missionId: assignment.missionId,
+      taskId: assignment.taskId,
+      assignmentId: assignment.assignmentId,
+      roleProfileId: assignment.roleProfileId,
+      roleInstructions: assignment.roleInstructions,
+      accessMode: assignment.accessMode,
+      ...(assignment.model === undefined ? {} : { model: assignment.model }),
+    }) !==
+    assignment.requestFingerprint
+  ) {
+    return 'Codex assignment fingerprint is stale or does not match the exact assignment.';
   }
   return undefined;
 }
@@ -111,7 +133,10 @@ function threadBinding(
     taskId: assignment.taskId,
     assignmentId: assignment.assignmentId,
     roleProfileId: assignment.roleProfileId,
+    requestFingerprint: assignment.requestFingerprint,
+    accessMode: assignment.accessMode,
     threadId,
+    initialTaskDispatchState: 'not-started',
     state: 'idle',
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -129,7 +154,9 @@ function assignmentMatchesBinding(
     assignment.missionId === binding.missionId &&
     assignment.taskId === binding.taskId &&
     assignment.assignmentId === binding.assignmentId &&
-    assignment.roleProfileId === binding.roleProfileId
+    assignment.roleProfileId === binding.roleProfileId &&
+    assignment.requestFingerprint === binding.requestFingerprint &&
+    assignment.accessMode === binding.accessMode
   );
 }
 
@@ -141,7 +168,10 @@ export class CodexMissionProviderAdapter
   private readonly outputByAssignment = new Map<string, string>();
   private readonly assignmentByThread = new Map<string, string>();
   private readonly completedTurns = new Map<string, 'idle' | 'failed'>();
+  private readonly assignmentTails = new Map<string, Promise<void>>();
+  private readonly operations = new Set<Promise<unknown>>();
   private closing = false;
+  private shutdownPromise: Promise<void> | undefined;
   private statusValue: MissionProviderStatus = {
     providerId: CODEX_PROVIDER_ID,
     displayName: 'Codex',
@@ -161,8 +191,12 @@ export class CodexMissionProviderAdapter
     return this.statusValue;
   }
 
-  async connect(): Promise<MissionProviderStatus> {
-    if (this.closing) return this.statusValue;
+  connect(): Promise<MissionProviderStatus> {
+    if (this.closing) return Promise.resolve(this.statusValue);
+    return this.trackOperation(this.connectUnlocked());
+  }
+
+  private async connectUnlocked(): Promise<MissionProviderStatus> {
     try {
       const state = await this.options.client.connect();
       this.statusValue = {
@@ -192,8 +226,17 @@ export class CodexMissionProviderAdapter
     if (this.closing) return failure('shutting-down', 'Codex is shutting down.');
     const invalid = validateAssignment(assignment);
     if (invalid !== undefined) return failure('invalid-assignment', invalid);
+    return this.enqueueAssignment(assignment.assignmentId, () =>
+      this.ensureConversationUnlocked(assignment, expectedBindingRevision),
+    );
+  }
+
+  private async ensureConversationUnlocked(
+    assignment: MissionRoleAssignment,
+    expectedBindingRevision: number,
+  ): Promise<MissionProviderResult<MissionConversation>> {
     if (!this.status.available) {
-      await this.connect();
+      await this.connectUnlocked();
     }
     if (!this.status.available) {
       return failure(
@@ -237,6 +280,7 @@ export class CodexMissionProviderAdapter
       assignmentId: assignment.assignmentId,
       roleProfileId: assignment.roleProfileId,
       requestFingerprint: assignment.requestFingerprint,
+      accessMode: assignment.accessMode,
       startedAt: timestamp,
     };
     try {
@@ -290,6 +334,7 @@ export class CodexMissionProviderAdapter
           providerConversationId: committed.threadId,
           assignmentId: committed.assignmentId,
           resumed: false,
+          initialTaskDispatchState: committed.initialTaskDispatchState,
         },
       };
     } catch (error) {
@@ -301,6 +346,14 @@ export class CodexMissionProviderAdapter
     assignmentId: string,
   ): Promise<MissionProviderResult<MissionConversation>> {
     if (this.closing) return failure('shutting-down', 'Codex is shutting down.');
+    return this.enqueueAssignment(assignmentId, () =>
+      this.resumeConversationUnlocked(assignmentId),
+    );
+  }
+
+  private async resumeConversationUnlocked(
+    assignmentId: string,
+  ): Promise<MissionProviderResult<MissionConversation>> {
     await this.options.bindings.reload();
     const binding = this.options.bindings.getBinding(assignmentId);
     if (binding === undefined) {
@@ -328,6 +381,15 @@ export class CodexMissionProviderAdapter
         `Codex task prompt must be 1–${maximum.toLocaleString('en-US')} characters without unsafe control bytes.`,
       );
     }
+    return this.enqueueAssignment(assignmentId, () =>
+      this.dispatchTurnUnlocked(assignmentId, taskPrompt),
+    );
+  }
+
+  private async dispatchTurnUnlocked(
+    assignmentId: string,
+    taskPrompt: string,
+  ): Promise<MissionProviderResult<MissionTurn>> {
     await this.options.bindings.reload();
     const binding = this.options.bindings.getBinding(assignmentId);
     if (binding === undefined) {
@@ -342,7 +404,19 @@ export class CodexMissionProviderAdapter
         'That exact Codex assignment already has an active turn.',
       );
     }
+    if (binding.initialTaskDispatchState === 'pending') {
+      return failure(
+        'uncertain-outcome',
+        'The initial Codex task dispatch has an uncertain outcome. Council will not duplicate it automatically.',
+      );
+    }
     try {
+      if (binding.initialTaskDispatchState === 'not-started') {
+        await this.options.bindings.beginInitialTaskDispatch(
+          this.options.bindings.state.data.revision,
+          assignmentId,
+        );
+      }
       const turn = await this.options.client.startTurn({
         threadId: binding.threadId,
         text: taskPrompt,
@@ -378,11 +452,29 @@ export class CodexMissionProviderAdapter
         },
       };
     } catch (error) {
+      if (
+        this.options.bindings.getBinding(assignmentId)
+          ?.initialTaskDispatchState === 'pending'
+      ) {
+        return failure(
+          'uncertain-outcome',
+          `The initial Codex task dispatch has an uncertain outcome. Council will not duplicate it automatically. ${errorMessage(error)}`,
+        );
+      }
       return failure(providerFailureKind(error), errorMessage(error));
     }
   }
 
   async interruptTurn(
+    assignmentId: string,
+  ): Promise<MissionProviderResult<void>> {
+    if (this.closing) return failure('shutting-down', 'Codex is shutting down.');
+    return this.enqueueAssignment(assignmentId, () =>
+      this.interruptTurnUnlocked(assignmentId),
+    );
+  }
+
+  private async interruptTurnUnlocked(
     assignmentId: string,
   ): Promise<MissionProviderResult<void>> {
     await this.options.bindings.reload();
@@ -410,7 +502,19 @@ export class CodexMissionProviderAdapter
     }
   }
 
-  async resolveApproval(
+  resolveApproval(
+    approvalId: string,
+    decision: MissionApprovalDecision,
+  ): Promise<MissionProviderResult<void>> {
+    if (this.closing) {
+      return Promise.resolve(
+        failure('shutting-down', 'Codex is shutting down.'),
+      );
+    }
+    return this.trackOperation(this.resolveApprovalUnlocked(approvalId, decision));
+  }
+
+  private async resolveApprovalUnlocked(
     approvalId: string,
     decision: MissionApprovalDecision,
   ): Promise<MissionProviderResult<void>> {
@@ -431,37 +535,50 @@ export class CodexMissionProviderAdapter
     return () => this.listeners.delete(listener);
   }
 
-  async shutdown(): Promise<void> {
-    if (this.closing) return;
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise !== undefined) return this.shutdownPromise;
     this.closing = true;
-    await this.options.bindings.reload();
-    for (const binding of Object.values(
-      this.options.bindings.state.data.bindings,
-    )) {
-      if (binding.state !== 'active' || binding.activeTurnId === undefined) continue;
-      try {
-        await this.options.client.interruptTurn(
-          binding.threadId,
-          binding.activeTurnId,
-        );
-        await this.options.bindings.reload();
-        const current = this.options.bindings.getBinding(binding.assignmentId);
-        if (
-          current?.state === 'active' &&
-          current.activeTurnId === binding.activeTurnId
-        ) {
-          await this.options.bindings.updateTurn(
-            this.options.bindings.state.data.revision,
-            binding.assignmentId,
-            undefined,
-            'idle',
-          );
-        }
-      } catch {
-        // Closing the owned App Server still ends the transport fail-closed.
-      }
+    this.shutdownPromise = this.shutdownUnlocked();
+    return this.shutdownPromise;
+  }
+
+  private async shutdownUnlocked(): Promise<void> {
+    while (this.operations.size > 0) {
+      await Promise.allSettled([...this.operations]);
     }
-    await this.options.client.stop();
+    try {
+      await this.options.bindings.reload();
+      for (const binding of Object.values(
+        this.options.bindings.state.data.bindings,
+      )) {
+        if (binding.state !== 'active' || binding.activeTurnId === undefined) {
+          continue;
+        }
+        try {
+          await this.options.client.interruptTurn(
+            binding.threadId,
+            binding.activeTurnId,
+          );
+          await this.options.bindings.reload();
+          const current = this.options.bindings.getBinding(binding.assignmentId);
+          if (
+            current?.state === 'active' &&
+            current.activeTurnId === binding.activeTurnId
+          ) {
+            await this.options.bindings.updateTurn(
+              this.options.bindings.state.data.revision,
+              binding.assignmentId,
+              undefined,
+              'idle',
+            );
+          }
+        } catch {
+          // Closing the owned App Server still ends the transport fail-closed.
+        }
+      }
+    } finally {
+      await this.options.client.stop();
+    }
   }
 
   private async resumeExact(
@@ -493,6 +610,10 @@ export class CodexMissionProviderAdapter
           providerConversationId: binding.threadId,
           assignmentId: binding.assignmentId,
           resumed: true,
+          initialTaskDispatchState: binding.initialTaskDispatchState,
+          ...(binding.initialTaskTurnId === undefined
+            ? {}
+            : { initialTaskTurnId: binding.initialTaskTurnId }),
         },
       };
     } catch (error) {
@@ -554,8 +675,17 @@ export class CodexMissionProviderAdapter
           ? 'failed'
           : 'idle';
       this.completedTurns.set(`${event.threadId}\0${event.turnId}`, status);
-      if (assignmentId !== undefined) {
-        void this.finishTurnFromEvent(assignmentId, event.turnId, status);
+      while (this.completedTurns.size > 128) {
+        const oldest = this.completedTurns.keys().next().value as
+          | string
+          | undefined;
+        if (oldest === undefined) break;
+        this.completedTurns.delete(oldest);
+      }
+      if (assignmentId !== undefined && !this.closing) {
+        void this.enqueueAssignment(assignmentId, () =>
+          this.finishTurnFromEvent(assignmentId, event.turnId, status),
+        ).catch(() => undefined);
       }
       projected = {
         type: 'turn',
@@ -665,6 +795,35 @@ export class CodexMissionProviderAdapter
     } catch {
       // The durable store remains authoritative and exposes its own problem.
     }
+  }
+
+  private enqueueAssignment<T>(
+    assignmentId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.assignmentTails.get(assignmentId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.assignmentTails.set(assignmentId, tail);
+    void tail.then(() => {
+      if (this.assignmentTails.get(assignmentId) === tail) {
+        this.assignmentTails.delete(assignmentId);
+      }
+    });
+    return this.trackOperation(result);
+  }
+
+  private trackOperation<T>(operation: Promise<T>): Promise<T> {
+    this.operations.add(operation);
+    void operation.then(
+      () => this.operations.delete(operation),
+      () => this.operations.delete(operation),
+    );
+    return operation;
   }
 }
 

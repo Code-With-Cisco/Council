@@ -17,6 +17,7 @@ export interface WorktreeLeaseRecord {
   readonly taskId: string;
   readonly assignmentId: string;
   readonly ownerProfileId: string;
+  readonly accessMode: 'workspace-write';
   readonly repositoryRoot: string;
   readonly commonGitDir: string;
   readonly objectFormat: GitObjectFormat;
@@ -44,11 +45,66 @@ export interface PendingWorktreeOperation {
   readonly createdAt: string;
 }
 
+export type GateWorktreeRunState =
+  | 'provisioning'
+  | 'running'
+  | 'cleanup-pending'
+  | 'retained'
+  | 'blocked'
+  | 'removed';
+
+export interface GateWorktreeRunTerminalResult {
+  readonly candidateId: string;
+  readonly executorExecutionId: string;
+  readonly executorProfileId: string;
+  readonly kind: 'test' | 'review';
+  readonly status: 'passed' | 'failed';
+  readonly commitSha: string;
+  readonly treeSha: string;
+  readonly commandIds: readonly string[];
+  readonly gatePolicyFingerprint: string;
+  readonly evidence: readonly string[];
+  readonly completedAt: string;
+  readonly retainedCheckoutPath?: string | undefined;
+}
+
+/**
+ * Durable ownership and idempotency journal for a detached Test or Review
+ * checkout. Raw command output is intentionally excluded. Terminal evidence is
+ * bounded digest metadata and is committed before checkout cleanup starts.
+ */
+export interface GateWorktreeRunRecord {
+  readonly runId: string;
+  readonly idempotencyKey: string;
+  readonly requestFingerprint: string;
+  readonly workspaceId: string;
+  readonly missionId: string;
+  readonly candidateId: string;
+  readonly kind: 'test' | 'review';
+  readonly assignmentId: string;
+  readonly ownerProfileId: string;
+  readonly accessMode: 'read-only';
+  readonly repositoryRoot: string;
+  readonly commonGitDir: string;
+  readonly objectFormat: GitObjectFormat;
+  readonly checkoutPath: string;
+  readonly commit: string;
+  readonly tree: string;
+  readonly commandIds: readonly string[];
+  readonly gatePolicyFingerprint: string;
+  readonly state: GateWorktreeRunState;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly blockedReason?: string | undefined;
+  readonly terminalResult?: GateWorktreeRunTerminalResult | undefined;
+}
+
 export interface WorktreeLeasesFileV1 {
   readonly version: typeof WORKTREE_LEASES_VERSION;
   readonly revision: number;
   readonly leases: Readonly<Record<string, WorktreeLeaseRecord>>;
   readonly pendingOperations: Readonly<Record<string, PendingWorktreeOperation>>;
+  readonly gateRuns: Readonly<Record<string, GateWorktreeRunRecord>>;
 }
 
 export type WorktreeLeaseStoreProblemKind = 'read' | 'parse' | 'write';

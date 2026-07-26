@@ -7,6 +7,7 @@
  */
 
 export const MISSION_LEDGER_VERSION = 1 as const;
+export const MAX_PREVIEW_ROLE_INSTRUCTIONS = 24_000;
 
 export type MissionId = string;
 export type MissionTaskId = string;
@@ -53,6 +54,8 @@ export type MissionExecutionState =
 
 export type MissionGateKind = 'test' | 'review';
 export type MissionGateStatus = 'passed' | 'failed';
+export type MissionAccessMode = 'read-only' | 'workspace-write';
+export type MissionProviderAction = 'start' | 'reuse' | 'resume';
 export type IntegrationCandidateState = 'ready' | 'integrated' | 'superseded';
 export type IntegrationApprovalStatus =
   | 'pending'
@@ -94,6 +97,9 @@ export interface WorktreeLeaseRecord {
   readonly missionId: MissionId;
   readonly taskId: MissionTaskId;
   readonly workspaceId: string;
+  readonly assignmentId: MissionExecutionId;
+  readonly ownerProfileId: string;
+  readonly accessMode: 'workspace-write';
   readonly branchName: string;
   readonly canonicalPath: string;
   readonly baseCommitSha: string;
@@ -110,8 +116,14 @@ export interface MissionExecutionRecord {
   readonly workspaceId: string;
   readonly profileId: string;
   readonly providerId: string;
+  readonly definitionFingerprint: string;
+  readonly accessMode: MissionAccessMode;
+  readonly providerAction: MissionProviderAction;
+  /** Immutable gate authority selected in the fingerprinted Start Squad plan. */
+  readonly gateResponsibility?: MissionGateKind | undefined;
   /** Exact provider-owned thread/session identity, retained for audit only. */
   readonly providerResourceId?: string | undefined;
+  readonly failureReason?: string | undefined;
   readonly state: MissionExecutionState;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -160,6 +172,9 @@ export interface MissionGateRecord {
   readonly status: MissionGateStatus;
   readonly commitSha: string;
   readonly treeSha: string;
+  readonly commandIds: readonly string[];
+  readonly gatePolicyFingerprint: string;
+  readonly executorExecutionId: MissionExecutionId;
   readonly executorProfileId: string;
   readonly evidence: readonly string[];
   readonly createdAt: string;
@@ -236,8 +251,14 @@ export interface RepositoryTargetSnapshot {
 export interface SquadSelection {
   readonly taskId: MissionTaskId;
   readonly profileId: string;
+  readonly providerId: string;
   readonly expectedDefinitionFingerprint: string;
   readonly writeCapable: boolean;
+}
+
+export interface SquadGateAssignmentSelection {
+  readonly testProfileId: string;
+  readonly reviewProfileId: string;
 }
 
 export interface ProviderStartPreview {
@@ -245,6 +266,17 @@ export interface ProviderStartPreview {
   readonly profileId: string;
   readonly providerId: string;
   readonly definitionFingerprint: string;
+  /**
+   * Complete normalized effective role contract. Undefined only when the
+   * contract exceeds the renderer preview bound, which makes the preview
+   * non-launchable.
+   */
+  readonly roleInstructions?: string | undefined;
+  /** SHA-256 over the exact effective role instructions used by the provider. */
+  readonly roleInstructionFingerprint: string;
+  readonly providerAvailable: boolean;
+  readonly providerAuthenticated: boolean;
+  readonly protocolReady: boolean;
   readonly action: 'start' | 'reuse' | 'resume';
   readonly launchable: boolean;
   readonly diagnostic?: string | undefined;
@@ -268,6 +300,14 @@ export interface SquadParticipantPreview {
   readonly lease: WorktreeLeasePreview | undefined;
 }
 
+export interface SquadGateAssignmentPreview {
+  readonly kind: MissionGateKind;
+  readonly taskId?: MissionTaskId | undefined;
+  readonly profileId?: string | undefined;
+  readonly executionIntent: 'allocate-read-only-on-start' | 'unassigned';
+  readonly diagnostic?: string | undefined;
+}
+
 export interface SquadStartPreview {
   readonly digest: string;
   readonly missionId: MissionId;
@@ -275,6 +315,10 @@ export interface SquadStartPreview {
   readonly ledgerRevision: number;
   readonly repository: RepositoryTargetSnapshot;
   readonly participants: readonly SquadParticipantPreview[];
+  readonly gateAssignments: {
+    readonly test: SquadGateAssignmentPreview;
+    readonly review: SquadGateAssignmentPreview;
+  };
   readonly blockers: readonly string[];
 }
 

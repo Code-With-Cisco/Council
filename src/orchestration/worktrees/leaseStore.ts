@@ -2,8 +2,12 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeJsonAtomic } from '../../config/atomicJson.js';
 import { isFullGitObjectId } from '../../git/client.js';
+import { isValidProfileId } from '../../profileIdentity.js';
 import {
   WORKTREE_LEASES_VERSION,
+  type GateWorktreeRunRecord,
+  type GateWorktreeRunState,
+  type GateWorktreeRunTerminalResult,
   type PendingWorktreeOperation,
   type WorktreeLeaseRecord,
   type WorktreeLeasesFileV1,
@@ -13,7 +17,13 @@ import {
   type WorktreeLeaseStoreState,
 } from './types.js';
 
-const ROOT_KEYS = new Set(['version', 'revision', 'leases', 'pendingOperations']);
+const ROOT_KEYS = new Set([
+  'version',
+  'revision',
+  'leases',
+  'pendingOperations',
+  'gateRuns',
+]);
 const LEASE_KEYS = new Set([
   'leaseId',
   'workspaceId',
@@ -21,6 +31,7 @@ const LEASE_KEYS = new Set([
   'taskId',
   'assignmentId',
   'ownerProfileId',
+  'accessMode',
   'repositoryRoot',
   'commonGitDir',
   'objectFormat',
@@ -44,8 +55,56 @@ const PENDING_KEYS = new Set([
   'expectedHead',
   'createdAt',
 ]);
+const GATE_RUN_KEYS = new Set([
+  'runId',
+  'idempotencyKey',
+  'requestFingerprint',
+  'workspaceId',
+  'missionId',
+  'candidateId',
+  'kind',
+  'assignmentId',
+  'ownerProfileId',
+  'accessMode',
+  'repositoryRoot',
+  'commonGitDir',
+  'objectFormat',
+  'checkoutPath',
+  'commit',
+  'tree',
+  'commandIds',
+  'gatePolicyFingerprint',
+  'state',
+  'createdAt',
+  'updatedAt',
+  'blockedReason',
+  'terminalResult',
+]);
+const GATE_RESULT_KEYS = new Set([
+  'candidateId',
+  'executorExecutionId',
+  'executorProfileId',
+  'kind',
+  'status',
+  'commitSha',
+  'treeSha',
+  'commandIds',
+  'gatePolicyFingerprint',
+  'evidence',
+  'completedAt',
+  'retainedCheckoutPath',
+]);
 const LEASE_ID = /^lease_[0-9a-f]{32}$/;
 const OPERATION_ID = /^leaseop_[0-9a-f]{32}$/;
+const GATE_RUN_ID = /^gaterun_[0-9a-f]{32}$/;
+const GATE_IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+const EXECUTION_ID = /^execution_[A-Za-z0-9_-]{8,96}$/;
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
+const COMMAND_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SHA_256 = /^[0-9a-f]{64}$/;
+const MAX_GATE_EVIDENCE_ENTRIES = 512;
+const MAX_GATE_EVIDENCE_ENTRY_LENGTH = 4_000;
+const MAX_GATE_EVIDENCE_BYTES = 256 * 1024;
 const COUNCIL_BRANCH = /^refs\/heads\/council\/[a-z0-9][a-z0-9/-]*$/;
 const CONTROL_BYTES = /[\u0000-\u001f\u007f]/;
 const STATES = new Set<WorktreeLeaseState>([
@@ -54,6 +113,14 @@ const STATES = new Set<WorktreeLeaseState>([
   'retained',
   'blocked',
   'cleanup-pending',
+  'removed',
+]);
+const GATE_RUN_STATES = new Set<GateWorktreeRunState>([
+  'provisioning',
+  'running',
+  'cleanup-pending',
+  'retained',
+  'blocked',
   'removed',
 ]);
 
@@ -79,21 +146,39 @@ export function emptyWorktreeLeasesFile(): WorktreeLeasesFileV1 {
     revision: 0,
     leases: emptyRecord<WorktreeLeaseRecord>(),
     pendingOperations: emptyRecord<PendingWorktreeOperation>(),
+    gateRuns: emptyRecord<GateWorktreeRunRecord>(),
   };
 }
 
 function cloneData(data: WorktreeLeasesFileV1): WorktreeLeasesFileV1 {
   const leases = emptyRecord<WorktreeLeaseRecord>();
   const pendingOperations = emptyRecord<PendingWorktreeOperation>();
+  const gateRuns = emptyRecord<GateWorktreeRunRecord>();
   for (const [key, lease] of Object.entries(data.leases)) leases[key] = { ...lease };
   for (const [key, pending] of Object.entries(data.pendingOperations)) {
     pendingOperations[key] = { ...pending };
+  }
+  for (const [key, run] of Object.entries(data.gateRuns)) {
+    gateRuns[key] = {
+      ...run,
+      commandIds: [...run.commandIds],
+      ...(run.terminalResult === undefined
+        ? {}
+        : {
+            terminalResult: {
+              ...run.terminalResult,
+              commandIds: [...run.terminalResult.commandIds],
+              evidence: [...run.terminalResult.evidence],
+            },
+          }),
+    };
   }
   return {
     version: WORKTREE_LEASES_VERSION,
     revision: data.revision,
     leases,
     pendingOperations,
+    gateRuns,
   };
 }
 
@@ -207,6 +292,12 @@ function parseLease(value: unknown, key: string): WorktreeLeaseRecord {
     taskId: string(raw['taskId'], `${location}.taskId`, 512),
     assignmentId: string(raw['assignmentId'], `${location}.assignmentId`, 512),
     ownerProfileId: string(raw['ownerProfileId'], `${location}.ownerProfileId`, 512),
+    accessMode: (() => {
+      if (raw['accessMode'] !== 'workspace-write') {
+        throw new Error(`${location}.accessMode must be workspace-write`);
+      }
+      return 'workspace-write' as const;
+    })(),
     repositoryRoot: absolutePath(raw['repositoryRoot'], `${location}.repositoryRoot`),
     commonGitDir: absolutePath(raw['commonGitDir'], `${location}.commonGitDir`),
     objectFormat: format,
@@ -291,6 +382,347 @@ function parsePending(
   };
 }
 
+function parseCommandIds(
+  value: unknown,
+  location: string,
+): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 256
+  ) {
+    throw new Error(
+      `${location} must be a non-empty bounded array`,
+    );
+  }
+  const commandIds = value.map((entry, index) => {
+    const id = string(entry, `${location}[${index}]`, 128);
+    if (!COMMAND_ID.test(id)) {
+      throw new Error(`${location}[${index}] is invalid`);
+    }
+    return id;
+  });
+  if (new Set(commandIds).size !== commandIds.length) {
+    throw new Error(`${location} contains duplicate IDs`);
+  }
+  return commandIds;
+}
+
+function exactStringArray(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function parseGateTerminalResult(
+  value: unknown,
+  location: string,
+  run: {
+    readonly candidateId: string;
+    readonly assignmentId: string;
+    readonly ownerProfileId: string;
+    readonly kind: 'test' | 'review';
+    readonly format: 'sha1' | 'sha256';
+    readonly checkoutPath: string;
+    readonly commit: string;
+    readonly tree: string;
+    readonly commandIds: readonly string[];
+    readonly gatePolicyFingerprint: string;
+    readonly state: GateWorktreeRunState;
+  },
+): GateWorktreeRunTerminalResult {
+  const raw = record(value, location);
+  onlyKeys(raw, GATE_RESULT_KEYS, location);
+  const candidateId = string(raw['candidateId'], `${location}.candidateId`, 512);
+  const executorExecutionId = string(
+    raw['executorExecutionId'],
+    `${location}.executorExecutionId`,
+    512,
+  );
+  const executorProfileId = string(
+    raw['executorProfileId'],
+    `${location}.executorProfileId`,
+    512,
+  );
+  const kind = raw['kind'];
+  if (kind !== 'test' && kind !== 'review') {
+    throw new Error(`${location}.kind is unsupported`);
+  }
+  const status = raw['status'];
+  if (status !== 'passed' && status !== 'failed') {
+    throw new Error(`${location}.status is unsupported`);
+  }
+  const commitSha = objectId(
+    raw['commitSha'],
+    `${location}.commitSha`,
+    run.format,
+  );
+  const treeSha = objectId(
+    raw['treeSha'],
+    `${location}.treeSha`,
+    run.format,
+  );
+  const commandIds = parseCommandIds(
+    raw['commandIds'],
+    `${location}.commandIds`,
+  );
+  const gatePolicyFingerprint = string(
+    raw['gatePolicyFingerprint'],
+    `${location}.gatePolicyFingerprint`,
+    64,
+  );
+  if (!SHA_256.test(gatePolicyFingerprint)) {
+    throw new Error(
+      `${location}.gatePolicyFingerprint must be a SHA-256 digest`,
+    );
+  }
+  if (
+    !Array.isArray(raw['evidence']) ||
+    raw['evidence'].length === 0 ||
+    raw['evidence'].length > MAX_GATE_EVIDENCE_ENTRIES
+  ) {
+    throw new Error(`${location}.evidence must be a non-empty bounded array`);
+  }
+  let evidenceBytes = 0;
+  const evidence = raw['evidence'].map((entry, index) => {
+    const parsed = string(
+      entry,
+      `${location}.evidence[${index}]`,
+      MAX_GATE_EVIDENCE_ENTRY_LENGTH,
+    );
+    evidenceBytes += Buffer.byteLength(parsed, 'utf8');
+    return parsed;
+  });
+  if (evidenceBytes > MAX_GATE_EVIDENCE_BYTES) {
+    throw new Error(`${location}.evidence exceeds its total byte limit`);
+  }
+  const completedAt = timestamp(raw['completedAt'], `${location}.completedAt`);
+  const retainedCheckoutPath =
+    Object.hasOwn(raw, 'retainedCheckoutPath') &&
+    raw['retainedCheckoutPath'] !== undefined
+      ? absolutePath(
+          raw['retainedCheckoutPath'],
+          `${location}.retainedCheckoutPath`,
+        )
+      : undefined;
+  if (
+    candidateId !== run.candidateId ||
+    executorExecutionId !== run.assignmentId ||
+    executorProfileId !== run.ownerProfileId ||
+    kind !== run.kind ||
+    commitSha !== run.commit ||
+    treeSha !== run.tree ||
+    !exactStringArray(commandIds, run.commandIds) ||
+    gatePolicyFingerprint !== run.gatePolicyFingerprint
+  ) {
+    throw new Error(`${location} does not match its exact gate run identity`);
+  }
+  if (
+    retainedCheckoutPath !== undefined &&
+    (retainedCheckoutPath !== run.checkoutPath ||
+      run.state !== 'retained' ||
+      status !== 'failed')
+  ) {
+    throw new Error(
+      `${location}.retainedCheckoutPath does not match a retained failed run`,
+    );
+  }
+  return {
+    candidateId,
+    executorExecutionId,
+    executorProfileId,
+    kind,
+    status,
+    commitSha,
+    treeSha,
+    commandIds,
+    gatePolicyFingerprint,
+    evidence,
+    completedAt,
+    ...(retainedCheckoutPath === undefined ? {} : { retainedCheckoutPath }),
+  };
+}
+
+function parseGateRun(
+  value: unknown,
+  key: string,
+): GateWorktreeRunRecord {
+  const location = `worktree leases.gateRuns.${key}`;
+  const raw = record(value, location);
+  onlyKeys(raw, GATE_RUN_KEYS, location);
+  const runId = string(raw['runId'], `${location}.runId`, 64);
+  if (!GATE_RUN_ID.test(runId) || runId !== key) {
+    throw new Error(`${location}.runId must match its generated key`);
+  }
+  const idempotencyKey = string(
+    raw['idempotencyKey'],
+    `${location}.idempotencyKey`,
+    128,
+  );
+  if (!GATE_IDEMPOTENCY_KEY.test(idempotencyKey)) {
+    throw new Error(
+      `${location}.idempotencyKey must be a bounded opaque identifier`,
+    );
+  }
+  const requestFingerprint = string(
+    raw['requestFingerprint'],
+    `${location}.requestFingerprint`,
+    64,
+  );
+  if (!SHA_256.test(requestFingerprint)) {
+    throw new Error(
+      `${location}.requestFingerprint must be a SHA-256 digest`,
+    );
+  }
+  const workspaceId = string(
+    raw['workspaceId'],
+    `${location}.workspaceId`,
+    512,
+  );
+  const missionId = string(raw['missionId'], `${location}.missionId`, 512);
+  const candidateId = string(
+    raw['candidateId'],
+    `${location}.candidateId`,
+    512,
+  );
+  if (
+    !OPAQUE_ID.test(workspaceId) ||
+    !OPAQUE_ID.test(missionId) ||
+    !OPAQUE_ID.test(candidateId)
+  ) {
+    throw new Error(
+      `${location} workspace, mission, and candidate IDs must be opaque`,
+    );
+  }
+  const kind = raw['kind'];
+  if (kind !== 'test' && kind !== 'review') {
+    throw new Error(`${location}.kind is unsupported`);
+  }
+  const assignmentId = string(
+    raw['assignmentId'],
+    `${location}.assignmentId`,
+    512,
+  );
+  const ownerProfileId = string(
+    raw['ownerProfileId'],
+    `${location}.ownerProfileId`,
+    512,
+  );
+  if (!EXECUTION_ID.test(assignmentId) || !isValidProfileId(ownerProfileId)) {
+    throw new Error(
+      `${location} assignment and owner profile IDs must be exact Mission identities`,
+    );
+  }
+  if (raw['accessMode'] !== 'read-only') {
+    throw new Error(`${location}.accessMode must be read-only`);
+  }
+  const format = raw['objectFormat'];
+  if (format !== 'sha1' && format !== 'sha256') {
+    throw new Error(`${location}.objectFormat must be sha1 or sha256`);
+  }
+  const state = raw['state'];
+  if (
+    typeof state !== 'string' ||
+    !GATE_RUN_STATES.has(state as GateWorktreeRunState)
+  ) {
+    throw new Error(`${location}.state is unsupported`);
+  }
+  const commandIds = parseCommandIds(
+    raw['commandIds'],
+    `${location}.commandIds`,
+  );
+  const gatePolicyFingerprint = string(
+    raw['gatePolicyFingerprint'],
+    `${location}.gatePolicyFingerprint`,
+    64,
+  );
+  if (!SHA_256.test(gatePolicyFingerprint)) {
+    throw new Error(
+      `${location}.gatePolicyFingerprint must be a SHA-256 digest`,
+    );
+  }
+  const blockedReason = optionalString(raw, 'blockedReason', location, 2_000);
+  if (
+    (state === 'blocked' || state === 'retained') &&
+    blockedReason === undefined
+  ) {
+    throw new Error(
+      `${location}.blockedReason is required for ${state} state`,
+    );
+  }
+  const repositoryRoot = absolutePath(
+    raw['repositoryRoot'],
+    `${location}.repositoryRoot`,
+  );
+  const commonGitDir = absolutePath(
+    raw['commonGitDir'],
+    `${location}.commonGitDir`,
+  );
+  const checkoutPath = absolutePath(
+    raw['checkoutPath'],
+    `${location}.checkoutPath`,
+  );
+  const commit = objectId(raw['commit'], `${location}.commit`, format);
+  const tree = objectId(raw['tree'], `${location}.tree`, format);
+  const terminalResult =
+    Object.hasOwn(raw, 'terminalResult') && raw['terminalResult'] !== undefined
+      ? parseGateTerminalResult(
+          raw['terminalResult'],
+          `${location}.terminalResult`,
+          {
+            candidateId,
+            assignmentId,
+            ownerProfileId,
+            kind,
+            format,
+            checkoutPath,
+            commit,
+            tree,
+            commandIds,
+            gatePolicyFingerprint,
+            state: state as GateWorktreeRunState,
+          },
+        )
+      : undefined;
+  if (
+    terminalResult !== undefined &&
+    (state === 'provisioning' || state === 'running')
+  ) {
+    throw new Error(
+      `${location}.terminalResult cannot be stored before terminal state`,
+    );
+  }
+  return {
+    runId,
+    idempotencyKey,
+    requestFingerprint,
+    workspaceId,
+    missionId,
+    candidateId,
+    kind,
+    assignmentId,
+    ownerProfileId,
+    accessMode: 'read-only',
+    repositoryRoot,
+    commonGitDir,
+    objectFormat: format,
+    checkoutPath,
+    commit,
+    tree,
+    commandIds,
+    gatePolicyFingerprint,
+    state: state as GateWorktreeRunState,
+    createdAt: timestamp(raw['createdAt'], `${location}.createdAt`),
+    updatedAt: timestamp(raw['updatedAt'], `${location}.updatedAt`),
+    ...(blockedReason === undefined ? {} : { blockedReason }),
+    ...(terminalResult === undefined ? {} : { terminalResult }),
+  };
+}
+
 function pathIdentity(value: string, platform: NodeJS.Platform): string {
   const api = platform === 'win32' ? path.win32 : path.posix;
   const normalized = api.normalize(value);
@@ -339,6 +771,39 @@ export function parseWorktreeLeasesFile(
     }
     leases[key] = lease;
   }
+  const rawGateRuns = record(raw['gateRuns'], 'worktree leases.gateRuns');
+  const gateRuns = emptyRecord<GateWorktreeRunRecord>();
+  const gateIdempotencyOwners = new Map<string, string>();
+  for (const key of Object.keys(rawGateRuns).sort()) {
+    const run = parseGateRun(rawGateRuns[key], key);
+    const idempotencyIdentity = `${run.workspaceId}\0${run.idempotencyKey}`;
+    const idempotencyOwner = gateIdempotencyOwners.get(idempotencyIdentity);
+    if (idempotencyOwner !== undefined) {
+      throw new Error(
+        `Gate idempotency key belongs to both ${idempotencyOwner} and ${key}`,
+      );
+    }
+    gateIdempotencyOwners.set(idempotencyIdentity, key);
+    if (run.state !== 'removed') {
+      const pathKey = pathIdentity(run.checkoutPath, platform);
+      const pathOwner = pathOwners.get(pathKey);
+      if (pathOwner !== undefined) {
+        throw new Error(
+          `Checkout path belongs to both ${pathOwner} and gate run ${key}`,
+        );
+      }
+      pathOwners.set(pathKey, key);
+      const assignmentKey = `${run.workspaceId}\0${run.assignmentId}`;
+      const assignmentOwner = assignmentOwners.get(assignmentKey);
+      if (assignmentOwner !== undefined) {
+        throw new Error(
+          `Assignment has both worktree owners ${assignmentOwner} and ${key}`,
+        );
+      }
+      assignmentOwners.set(assignmentKey, key);
+    }
+    gateRuns[key] = run;
+  }
   const rawPending = record(
     raw['pendingOperations'],
     'worktree leases.pendingOperations',
@@ -359,6 +824,7 @@ export function parseWorktreeLeasesFile(
     revision: raw['revision'] as number,
     leases,
     pendingOperations,
+    gateRuns,
   };
 }
 
