@@ -12,8 +12,8 @@
     <div class="app-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">CLAUDE CODE CONTROL SURFACE</p>
-          <h1>Decagram Council</h1>
+          <p class="eyebrow">LOCAL AGENT CONTROL SURFACE</p>
+          <h1>Decagram Council <span class="title-suffix">/ Ops Deck</span></h1>
         </div>
         <div class="topbar-actions">
           <span id="connection-state" class="connection-pill">Starting…</span>
@@ -31,13 +31,63 @@
       </section>
 
       <nav class="tabs" aria-label="Primary views">
-        <button class="tab is-active" data-view="squad">Squad</button>
-        <button class="tab" data-view="council">Council Review</button>
+        <button class="tab is-active" data-view="office">Office</button>
+        <button class="tab" data-view="squad">Agents</button>
+        <button class="tab" data-view="council">Council</button>
         <button class="tab" data-view="diagnostics">Diagnostics</button>
       </nav>
 
       <main>
-        <section id="view-squad" class="view is-active">
+        <section id="view-office" class="view is-active">
+          <div class="section-heading office-heading">
+            <div>
+              <p class="eyebrow">PIXEL OFFICE</p>
+              <h2>Live agent floor</h2>
+            </div>
+            <div class="office-pagination" aria-label="Office pages">
+              <button id="office-previous" class="button button-compact" type="button"
+                aria-label="Previous office">←</button>
+              <span id="office-page-label" class="mono-label">OFFICE 1 / 1</span>
+              <button id="office-next" class="button button-compact" type="button"
+                aria-label="Next office">→</button>
+            </div>
+          </div>
+
+          <div class="pixel-frame">
+            <div class="pixel-canvas-scroll">
+              <canvas id="pixel-office" width="1248" height="570" tabindex="0"
+                aria-label="Top-down pixel office showing live agent state">
+                The pixel office requires canvas support. Use the Agents view for all controls.
+              </canvas>
+            </div>
+            <div class="pixel-status-strip">
+              <span id="office-summary">Waiting for the first runtime snapshot…</span>
+              <span><kbd>V</kbd> OFFICE / CONSOLE</span>
+            </div>
+          </div>
+
+          <div class="office-control-grid">
+            <section class="station-panel" aria-labelledby="station-heading">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">WORKSTATIONS</p>
+                  <h3 id="station-heading">This office</h3>
+                </div>
+                <span class="muted">Five stations per room</span>
+              </div>
+              <div id="office-stations" class="station-list"></div>
+            </section>
+            <aside id="office-detail" class="detail-panel office-detail">
+              <p class="eyebrow">AGENT DETAIL</p>
+              <h3>Select a workstation</h3>
+              <p class="muted">
+                Click a character, desk, or accessible station control to manage that agent.
+              </p>
+            </aside>
+          </div>
+        </section>
+
+        <section id="view-squad" class="view">
           <div class="section-heading">
             <div>
               <p class="eyebrow">AGENT CATALOG</p>
@@ -67,8 +117,9 @@
               <label for="council-question">Decision or question</label>
               <textarea id="council-question" rows="8"
                 placeholder="What decision should the council evaluate?" required></textarea>
-              <label for="council-cwd">Project folder</label>
-              <input id="council-cwd" type="text" required />
+              <p class="project-target">
+                Project: <span id="council-project" class="mono-label">Loading…</span>
+              </p>
               <div class="form-actions">
                 <button class="button button-primary" type="submit">Start council review</button>
                 <span id="council-feedback" class="muted" role="status"></span>
@@ -95,9 +146,10 @@
 
       <footer>
         <span id="global-feedback" role="status">Ready.</span>
-        <span>Windows-only preview</span>
+        <span>macOS development · Windows production</span>
       </footer>
     </div>
+    <script src="./pixel-office.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

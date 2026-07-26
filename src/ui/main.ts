@@ -74,13 +74,13 @@ function isTrustedIpcSender(event: IpcMainInvokeEvent): boolean {
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     title: APP_NAME,
-    width: 1240,
-    height: 820,
-    minWidth: 920,
-    minHeight: 640,
+    width: 1380,
+    height: 900,
+    minWidth: 960,
+    minHeight: 680,
     show: false,
     frame: true,
-    backgroundColor: '#0b1020',
+    backgroundColor: '#0e1114',
     webPreferences: {
       preload: path.join(sourceUiDir, 'preload.cjs'),
       contextIsolation: true,
@@ -152,14 +152,15 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.council,
-    async (event, question: unknown, cwd: unknown) => {
+    async (event, question: unknown) => {
       if (!isTrustedIpcSender(event)) return unavailable('Untrusted IPC sender.');
       if (supervisor === undefined) return unavailable('Claude integration is unavailable. Review Diagnostics.');
       if (typeof question !== 'string' || question.trim() === '') {
         return unavailable('Council question cannot be empty.');
       }
-      if (typeof cwd !== 'string' || cwd.trim() === '') return unavailable('Project path is required.');
-      return toUiResult(await supervisor.startCouncilReview(question, path.resolve(cwd)));
+      const projectDir = currentState?.projectDir;
+      if (projectDir === undefined) return unavailable('Project path is unavailable.');
+      return toUiResult(await supervisor.startCouncilReview(question, projectDir));
     },
   );
 }

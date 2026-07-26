@@ -1,24 +1,28 @@
 'use strict';
 
 const api = window.decagramCouncil;
-const identity = {
-  arden: { color: '#8ea1ff', sigil: 'A' },
-  bram: { color: '#ff9d73', sigil: 'B' },
-  rook: { color: '#d0a4ff', sigil: 'R' },
-  tess: { color: '#63d9d0', sigil: 'T' },
-  sage: { color: '#b5da72', sigil: 'S' },
-};
+const IDENTITY_COLORS = [
+  '#7fa9dc',
+  '#d9b36b',
+  '#c08fd8',
+  '#7cc49e',
+  '#64bfc2',
+  '#d98072',
+  '#82a7c9',
+  '#b7c46f',
+  '#d196b2',
+  '#8f9bdd',
+  '#d58b5d',
+  '#73b8a7',
+];
+const AGENTS_PER_OFFICE = 5;
 
 function identityFor(key, label) {
-  const known = identity[key];
-  if (known) return known;
-
   let hash = 2166136261;
   for (const char of key) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 16777619);
   }
-  const hue = Math.abs(hash) % 360;
   const sigil =
     label
       .split(/[-_\s]+/)
@@ -26,11 +30,15 @@ function identityFor(key, label) {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? '')
       .join('') || '?';
-  return { color: `hsl(${hue} 68% 70%)`, sigil };
+  return { color: IDENTITY_COLORS[Math.abs(hash) % IDENTITY_COLORS.length], sigil };
 }
 
 let state;
 let selectedKey;
+let activeView = 'office';
+let previousConsoleView = 'squad';
+let officePage = 0;
+let officeRenderer;
 
 const byId = (id) => document.getElementById(id);
 
@@ -43,6 +51,32 @@ function element(tag, className, text) {
 
 function setFeedback(message) {
   byId('global-feedback').textContent = message;
+}
+
+function activateView(viewName) {
+  if (viewName !== 'office') previousConsoleView = viewName;
+  activeView = viewName;
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.classList.toggle('is-active', tab.dataset.view === viewName);
+  });
+  document.querySelectorAll('.view').forEach((view) => {
+    view.classList.toggle('is-active', view.id === `view-${viewName}`);
+  });
+  if (viewName === 'office') byId('pixel-office').focus({ preventScroll: true });
+}
+
+function slotState(slot) {
+  return slot.session?.state ?? (slot.missing ? 'not started' : 'unknown');
+}
+
+function officeMode(slot) {
+  if (!slot.session) return 'missing';
+  if (slot.session.state === 'working') return slot.session.cold ? 'cold' : 'working';
+  if (slot.session.state === 'blocked') return 'blocked';
+  if (slot.session.state === 'failed') return 'failed';
+  if (slot.session.state === 'done') return 'done';
+  if (slot.session.state === 'stopped') return 'stopped';
+  return slot.session.cold ? 'cold' : 'idle';
 }
 
 function statusClass(stateName) {
@@ -92,6 +126,90 @@ function renderAttention(snapshot) {
   byId('attention-detail').textContent = first.waitingFor ?? first.detail ?? 'Waiting for input';
   byId('attention-count').textContent =
     sessions.length === 1 ? '1 item' : `${sessions.length} items · showing first`;
+}
+
+function renderOffice(snapshot) {
+  const slots = snapshot?.roster.squad ?? [];
+  const pageCount = Math.max(1, Math.ceil(slots.length / AGENTS_PER_OFFICE));
+  officePage = Math.min(officePage, pageCount - 1);
+  const firstIndex = officePage * AGENTS_PER_OFFICE;
+  const pageSlots = slots.slice(firstIndex, firstIndex + AGENTS_PER_OFFICE);
+  const runningCount = slots.filter((slot) => slot.session?.state === 'working').length;
+  const blockedCount = slots.filter((slot) => slot.session?.state === 'blocked').length;
+
+  byId('office-page-label').textContent = `OFFICE ${officePage + 1} / ${pageCount}`;
+  byId('office-previous').disabled = officePage === 0;
+  byId('office-next').disabled = officePage >= pageCount - 1;
+  byId('office-summary').textContent = snapshot
+    ? `${slots.length} definitions · ${runningCount} working · ${blockedCount} need${blockedCount === 1 ? 's' : ''} you`
+    : 'Waiting for the first runtime snapshot…';
+
+  officeRenderer?.setScene({
+    agents: pageSlots.map((slot) => {
+      const theme = identityFor(slot.member.key, slot.member.label);
+      return {
+        key: slot.member.key,
+        label: slot.member.label,
+        color: theme.color,
+        mode: officeMode(slot),
+      };
+    }),
+    connected: state?.preflight.claude?.meetsMinimum === true && snapshot !== undefined,
+    stale: snapshot?.rosterError !== undefined,
+    page: officePage + 1,
+    pages: pageCount,
+  });
+
+  const stationList = byId('office-stations');
+  stationList.replaceChildren();
+  if (pageSlots.length === 0) {
+    stationList.append(
+      element(
+        'p',
+        'muted',
+        'No launchable definitions are visible. Open Diagnostics for discovery details.',
+      ),
+    );
+  }
+
+  for (const slot of pageSlots) {
+    const theme = identityFor(slot.member.key, slot.member.label);
+    const currentState = slotState(slot);
+    const button = element(
+      'button',
+      `station-button ${currentState === 'blocked' ? 'is-blocked' : ''} ${currentState === 'failed' ? 'is-failed' : ''} ${selectedKey === slot.member.key ? 'is-selected' : ''}`,
+    );
+    button.type = 'button';
+    button.style.setProperty('--identity', theme.color);
+    button.setAttribute('aria-pressed', selectedKey === slot.member.key ? 'true' : 'false');
+    button.setAttribute('aria-label', `${slot.member.label}, ${currentState}`);
+    button.append(
+      element('span', 'station-sigil', theme.sigil),
+      element('span', 'station-name', slot.member.label),
+      element('span', 'station-state', currentState),
+    );
+    button.addEventListener('click', () => {
+      selectedKey = slot.member.key;
+      renderOffice(snapshot);
+    });
+    stationList.append(button);
+  }
+
+  const selected = pageSlots.find((slot) => slot.member.key === selectedKey);
+  if (selected) {
+    renderAgentDetail(byId('office-detail'), selected, 'AGENT DETAIL');
+  } else {
+    const panel = byId('office-detail');
+    panel.replaceChildren(
+      element('p', 'eyebrow', 'AGENT DETAIL'),
+      element('h3', '', 'Select a workstation'),
+      element(
+        'p',
+        'muted',
+        'Click a character, desk, or accessible station control to manage that agent.',
+      ),
+    );
+  }
 }
 
 function renderSquad(snapshot) {
@@ -169,31 +287,60 @@ function appendMeta(list, label, value) {
 }
 
 function renderDetail(slot) {
-  const panel = byId('session-detail');
+  renderAgentDetail(byId('session-detail'), slot, 'SESSION DETAIL');
+}
+
+function renderAgentDetail(panel, slot, kicker) {
   panel.replaceChildren();
   const session = slot.session;
-  panel.append(element('p', 'eyebrow', 'SESSION DETAIL'));
+  panel.append(element('p', 'eyebrow', kicker));
   panel.append(element('h3', '', slot.member.label));
+
+  const profile = element('dl', 'detail-meta');
+  appendMeta(profile, 'Definition', slot.member.agent);
+  appendMeta(profile, 'Role', slot.member.role);
+  appendMeta(profile, 'Folder', slot.member.cwd);
+  panel.append(profile);
+
   if (!session?.id) {
-    panel.append(element('p', 'muted', 'This specialist does not have an actionable background session.'));
+    const message =
+      slot.validation?.found === false
+        ? 'The definition is missing, so this workstation cannot launch.'
+        : 'This agent is available and has not been started.';
+    panel.append(element('p', 'muted', message));
+    const start = element('button', 'button button-primary', 'Start agent');
+    start.disabled =
+      state?.capabilities.start !== true || slot.validation?.found === false;
+    start.addEventListener('click', async () => {
+      await runAction(start, 'Starting…', () => api.startMember(slot.member.key));
+    });
+    panel.append(start);
     return;
   }
 
   const meta = element('dl', 'detail-meta');
   appendMeta(meta, 'Session', session.id);
   appendMeta(meta, 'State', session.state ?? 'unknown');
+  appendMeta(meta, 'Current work', session.waitingFor ?? session.detail ?? session.intent);
   appendMeta(meta, 'Started', humanDate(session.startedAt));
   appendMeta(meta, 'Updated', humanDate(session.updatedAt));
-  appendMeta(meta, 'Folder', session.cwd);
   panel.append(meta);
 
   const log = element('pre', 'log-output', 'Select “Load recent output” to read this session.');
   const load = element('button', 'button', 'Load recent output');
+  load.disabled = state?.capabilities.logs !== true;
   load.addEventListener('click', async () => {
     const result = await runAction(load, 'Loading…', () => api.logs(session.id));
     log.textContent = result?.ok ? result.value || '(No output)' : result?.message ?? 'Unable to load output.';
   });
-  panel.append(load, log);
+  const stop = element('button', 'button button-danger', 'Stop session');
+  stop.disabled = state?.capabilities.stop !== true;
+  stop.addEventListener('click', async () => {
+    await runAction(stop, 'Stopping…', () => api.stopSession(session.id));
+  });
+  const actions = element('div', 'card-actions');
+  actions.append(load, stop);
+  panel.append(actions, log);
 
   const replyRow = element('div', 'reply-row');
   const reply = element('input');
@@ -282,16 +429,55 @@ function render() {
   byId('updated-at').textContent = snapshot ? `Updated ${humanDate(snapshot.updatedAt)}` : '';
   byId('wake-button').hidden = !snapshot?.needsWake;
   renderAttention(snapshot);
+  renderOffice(snapshot);
   renderSquad(snapshot);
   renderDiagnostics();
 }
 
 for (const tab of document.querySelectorAll('.tab')) {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((node) => node.classList.toggle('is-active', node === tab));
-    document.querySelectorAll('.view').forEach((view) => view.classList.toggle('is-active', view.id === `view-${tab.dataset.view}`));
+    activateView(tab.dataset.view);
   });
 }
+
+officeRenderer = window.CouncilPixelOffice.create(byId('pixel-office'), {
+  onAgentSelected(key) {
+    selectedKey = key;
+    renderOffice(state?.snapshot);
+  },
+  onRoomSelected(room) {
+    if (room === 'diagnostics') activateView('diagnostics');
+    if (room === 'council') activateView('council');
+  },
+});
+
+byId('office-previous').addEventListener('click', () => {
+  officePage = Math.max(0, officePage - 1);
+  selectedKey = undefined;
+  renderOffice(state?.snapshot);
+});
+
+byId('office-next').addEventListener('click', () => {
+  officePage += 1;
+  selectedKey = undefined;
+  renderOffice(state?.snapshot);
+});
+
+window.addEventListener('keydown', (event) => {
+  const target = event.target;
+  const tagName = target?.tagName ?? '';
+  if (
+    tagName === 'INPUT' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT' ||
+    target?.isContentEditable
+  ) {
+    return;
+  }
+  if (event.key.toLowerCase() !== 'v') return;
+  event.preventDefault();
+  activateView(activeView === 'office' ? previousConsoleView : 'office');
+});
 
 byId('wake-button').addEventListener('click', async (event) => {
   await runAction(event.currentTarget, 'Waking…', () => api.wakeSquad());
@@ -302,7 +488,7 @@ byId('council-form').addEventListener('submit', async (event) => {
   const button = event.currentTarget.querySelector('button[type="submit"]');
   const feedback = byId('council-feedback');
   const result = await runAction(button, 'Convening…', () =>
-    api.council(byId('council-question').value, byId('council-cwd').value),
+    api.council(byId('council-question').value),
   );
   feedback.textContent = result?.ok
     ? `Council started as session ${result.value.id}.`
@@ -318,7 +504,7 @@ api.onSnapshot((snapshot) => {
 api.getState()
   .then((initial) => {
     state = initial;
-    byId('council-cwd').value = initial.projectDir;
+    byId('council-project').textContent = initial.projectDir;
     render();
   })
   .catch((error) => {

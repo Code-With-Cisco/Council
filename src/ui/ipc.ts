@@ -44,6 +44,6 @@ export interface DecagramCouncilApi {
   wakeSquad(): Promise<UiResult<string>>;
   logs(id: string): Promise<UiResult<string>>;
   reply(id: string, message: string): Promise<UiResult<ReplyOutcome>>;
-  council(question: string, cwd: string): Promise<UiResult<StartSessionOutcome>>;
+  council(question: string): Promise<UiResult<StartSessionOutcome>>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
 }

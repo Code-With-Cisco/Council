@@ -32,12 +32,15 @@ describe('Windows Electron shell', () => {
     expect(main).toContain('app.setAppUserModelId(APP_ID)');
     expect(main).toContain('isTrustedIpcSender');
     expect(main).toContain('AgentSupervisorPort');
+    expect(main).toContain('currentState?.projectDir');
+    expect(main).not.toContain('path.resolve(cwd)');
   });
 
   it('keeps preload channel names synchronized with the typed contract', async () => {
     const preload = await readFile(path.join(REPO_ROOT, 'src', 'ui', 'preload.cjs'), 'utf8');
     for (const channel of Object.values(IPC_CHANNELS)) expect(preload).toContain(`'${channel}'`);
     expect(preload).toContain('contextBridge.exposeInMainWorld');
+    expect(preload).toContain('council: (question)');
   });
 
   it('ships a restrictive renderer content security policy', async () => {
@@ -53,5 +56,33 @@ describe('Windows Electron shell', () => {
     expect(html).toContain("object-src 'none'");
     expect(html).not.toContain('unsafe-inline');
     expect(renderer).toContain("guard.status === 'passed'");
+  });
+
+  it('recreates the pixel office locally without the prototype runtime or fixed personas', async () => {
+    const html = await readFile(
+      path.join(REPO_ROOT, 'src', 'ui', 'renderer', 'index.html'),
+      'utf8',
+    );
+    const renderer = await readFile(
+      path.join(REPO_ROOT, 'src', 'ui', 'renderer', 'renderer.js'),
+      'utf8',
+    );
+    const pixelOffice = await readFile(
+      path.join(REPO_ROOT, 'src', 'ui', 'renderer', 'pixel-office.js'),
+      'utf8',
+    );
+
+    expect(html).toContain('id="pixel-office"');
+    expect(html).toContain('src="./pixel-office.js"');
+    expect(html).not.toContain('support.js');
+    expect(html).not.toContain('fonts.googleapis.com');
+    expect(renderer).toContain('AGENTS_PER_OFFICE = 5');
+    expect(renderer).toContain('snapshot?.roster.squad');
+    expect(renderer).not.toContain('arden:');
+    expect(renderer).not.toContain('bram:');
+    expect(pixelOffice).toContain("type: 'agent'");
+    expect(pixelOffice).toContain("type: 'room'");
+    expect(pixelOffice).not.toContain('new Function');
+    expect(pixelOffice).not.toContain('fetch(');
   });
 });

@@ -83,9 +83,15 @@ adding provider conditionals to the renderer.
 - Changed Wake to respawn only failed configured sessions rather than every
   Claude background job.
 - Added reply length and control-character validation.
+- Removed the renderer-supplied Council working directory; Council launches now
+  resolve the selected project inside the privileged process.
 - Fixed source/compiled resolution of bundled PowerShell guard scripts.
 - Allowed unpackaged development launch on macOS. Packaged builds remain
   Windows-only.
+- Recreated the Claude Design pixel office as a local, CSP-safe canvas view.
+  It is driven by live supervisor snapshots, supports five stations per paged
+  room, opens agent controls from character/desk hitboxes, and routes the
+  diagnostics and Council rooms to their real views.
 
 Do not undo these changes while implementing later phases.
 
@@ -218,20 +224,25 @@ Do not hard-code five station IDs into the new architecture.
 
 ### 7.1 Rendering approach
 
-Start with a hybrid DOM/CSS scene:
+The received design uses a procedurally drawn canvas, so the initial production
+slice keeps that useful constraint without importing its preview runtime:
 
-- fixed logical-resolution artboard;
-- layered room PNGs or a Tiled map;
-- nearest-neighbor integer scaling and letterboxing;
-- accessible DOM buttons positioned over station/room hotspots;
-- agent sprites using CSS `steps()` animations;
-- a pixel-framed DOM drawer for logs, forms, and session detail;
-- normal readable fonts for long output and diagnostics; and
-- reduced-motion states.
+- fixed 624×285 logical scene drawn at a 2× 1248×570 display size;
+- device-pixel-ratio backing store and disabled image smoothing;
+- five workstations per paged office for dynamic catalogs;
+- stable-ID canvas hitboxes plus equivalent accessible DOM station controls;
+- a DOM detail panel for start, stop, logs, and one-line reply;
+- the `V` shortcut, ignored while editing text;
+- a paused animation tick while the document is hidden;
+- reduced-motion behavior; and
+- normal readable fonts for long output and diagnostics.
 
-Do not introduce a game engine for the first pixel UI. Add PixiJS/canvas only if
-free movement, pathfinding, or many animated entities become a demonstrated
-requirement.
+If original layered art is commissioned later, replace the drawing layer with
+room PNGs/Tiled data and sprite strips while preserving the same scene view
+model, DOM controls, and hitbox contract.
+
+Do not introduce a game engine unless free movement, pathfinding, or many
+animated entities becomes a demonstrated requirement.
 
 ### 7.2 Authoritative visual mapping
 
@@ -255,19 +266,34 @@ Station clicks select the same supervisor profile/session used by the standard
 UI. Sprite animation is decoration and must never optimistically change domain
 state.
 
-## 8. Claude Design handoff required
+## 8. Claude Design handoff received
 
-A screenshot is enough to establish direction, but not enough to implement the
-final scene faithfully. Request the following from Claude Design:
+The export named `Desktop application with squad interface design.zip` was
+reviewed on 2026-07-26.
 
-1. **Shareable source:** public/project share link, exported project ZIP, or the
-   generated HTML/CSS/React code.
-2. **Original art source:** preferably `.aseprite` and Tiled `.tmj`; layered PSD
+Use `Muster - Ops Deck.dc.html` and its handoff README as visual and behavioral
+references only. Do not package either `.dc.html` file or `support.js`.
+The custom preview runtime dynamically evaluates code, loads React/Babel and
+fonts from remote CDNs, and is incompatible with the production renderer's
+self-only CSP.
+
+The first pixel-office implementation has therefore been independently
+recreated in `src/ui/renderer/pixel-office.js` using local drawing primitives.
+It does not ship either uploaded screenshot, remote code, canned agent data,
+fake metrics, or the five fictional prototype personas.
+
+The following gaps remain before calling the design final:
+
+1. **Formal provenance:** the bundle contains no license or provenance manifest,
+   and its uploaded screenshots are third-party inspiration. Do not package or
+   trace those images.
+2. **Original art source, if the procedural scene is replaced:** preferably
+   `.aseprite` and Tiled `.tmj`; layered PSD
    or Figma is an acceptable secondary source.
-3. **Provenance and licenses:** confirmation that every character, prop, tile,
-   font, and sound is original or licensed for this app. Do not extract or trace
-   assets from the reference screenshot.
-4. **Scene specification:** native logical resolution, tile size, palette,
+3. **Font files and licenses:** bundle Archivo, JetBrains Mono, and Press Start
+   2P locally before claiming typography fidelity. Do not load Google Fonts at
+   runtime.
+4. **Scene specification for final commissioned art:** native logical resolution, tile size, palette,
    intended integer scale, minimum-window crop/letterbox rules, and safe areas.
 5. **Layered map:** `floor`, `walls_back`, `props_back`, `furniture`,
    `foreground_occluders`, and `lighting`, all sharing one origin.
@@ -286,8 +312,9 @@ final scene faithfully. Request the following from Claude Design:
 11. **Reference states:** all idle, several working, multiple blocked, failed
     after restart, stale/disconnected, and Council running.
 
-Ask for a clean uncropped render without the surrounding black screenshot border
-or clipped page text. Export native 1x pixels with no antialiasing or resampling.
+If final raster art is commissioned, request a clean uncropped render without a
+surrounding screenshot border or clipped page text. Export native 1x pixels with
+no antialiasing or resampling.
 
 ## 9. macOS development instructions
 
@@ -353,9 +380,11 @@ The next phase is complete when:
 ## 12. Prompt to give Codex
 
 > Read `docs/codex-next-phase-brief.md` completely. Continue from the existing
-> supervisor and dynamic-discovery slice; do not replace Electron or rewrite the
-> integration layer. Implement Section 5 in small tested commits while preserving
-> the current IPC channel strings and card UI. Stop before the final pixel-art
-> renderer unless the original Claude Design source and licensed asset package
-> described in Section 8 are present. Run typecheck, build, and tests after each
-> slice, and report macOS evidence separately from required Windows verification.
+> supervisor, dynamic-discovery, and pixel-office slices; do not replace Electron
+> or rewrite the integration layer. Implement Section 5 in small tested commits
+> while preserving the current IPC channel strings and both the card and pixel
+> views. Treat the pixel office as a truthful visual projection, never as runtime
+> state. Do not package the Claude Design `.dc.html`, `support.js`, remote fonts,
+> uploaded screenshots, or canned prototype data. Run typecheck, build, and tests
+> after each slice, and report macOS evidence separately from required Windows
+> verification.

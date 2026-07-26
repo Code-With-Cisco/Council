@@ -15,6 +15,7 @@ Claude's state files, and renders that authoritative state.
 | Integration module and parsers | Implemented; platform-neutral tests pass |
 | PowerShell hooks and runtime guards | Implemented; awaiting a real Windows execution |
 | Discovered-agent catalog UI | Implemented |
+| Snapshot-driven pixel office | Initial paged implementation |
 | Council Review pipeline | Implemented |
 | Windows launch preflight and diagnostics | Implemented |
 | x64 NSIS installer configuration | Implemented; packaging awaits final app ID and Windows verification |
@@ -52,6 +53,13 @@ IPC operations for:
 The UI shows one card per configured or discovered agent with identity, role, state, hot/cold
 status, and pin state. Human-blocked sessions share one amber attention channel; when several need
 attention, the first is shown with a count instead of creating competing alert surfaces.
+
+The default Office view recreates the supplied Ops Deck art direction with local
+canvas primitives. It shows five data-driven workstations per paged office, so
+the scene scales beyond a fixed roster. Character, workstation, diagnostics-room,
+and Council-room interactions route back to the same supervisor-backed controls
+as the accessible Agents, Council, and Diagnostics views. Press `V` outside a
+text field to toggle between the office and the most recent console view.
 
 The diagnostics view does not guess. Missing dependencies remain visible, a stopped Claude
 daemon is shown as a normal resting state, and unrecognized daemon prose is shown as
