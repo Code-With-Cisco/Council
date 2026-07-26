@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/gates/agent-write-dispatch.sh",
+            "timeout": 30,
+            "statusMessage": "Checking agent write boundary"
+          }
+        ]
+      }
+    ]
+  }
+}

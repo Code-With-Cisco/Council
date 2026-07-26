@@ -22,6 +22,11 @@ skills:
   - create-prd
 effort: high
 color: purple
+# NOTE: frontmatter hooks DO NOT FIRE in Claude Code 2.1.220 (verified on both the
+# --agent and Agent-tool paths). The guard that actually enforces this boundary is
+# registered in .claude/settings.json via scripts/gates/agent-write-dispatch.sh.
+# This block is kept as belt-and-braces for when the defect is fixed; it is inert
+# today. See scripts/gates/README.md.
 hooks:
   PreToolUse:
     - matcher: "Edit|Write"

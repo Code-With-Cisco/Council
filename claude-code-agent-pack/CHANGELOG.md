@@ -38,6 +38,27 @@ Runtime gates — the part that actually enforces anything:
   closed on an unparseable payload, a missing `file_path`, or `..` traversal.
 - Hook commands use `${CLAUDE_PROJECT_DIR}`, not a relative path, which would
   resolve against the agent's cwd and break inside a worktree.
+- **Frontmatter `hooks` do not fire in Claude Code 2.1.220.** Discovered during
+  runtime verification: the guards were originally attached per-agent via the
+  documented `hooks` frontmatter field, and enforced nothing. Tested three ways —
+  an agent run via `--agent` wrote to a blocked path successfully; an
+  always-block probe on `Read`, attached to an agent spawned through the Agent
+  tool, let the read through; the same guard registered in `settings.json`
+  blocked correctly with its own reason text. The documentation states
+  frontmatter hooks fire on both paths, so this is a defect, not a
+  misconfiguration. Re-test on upgrade.
+- Guards are therefore registered once in `.claude/settings.json` pointing at
+  `scripts/gates/agent-write-dispatch.sh`, which reads `agent_type` from the
+  payload and routes to the matching guard. Confirmed empirically that
+  `agent_type` carries the agent's frontmatter `name`.
+- The dispatcher **defaults to allow**. A settings-level hook fires for every
+  `Edit`/`Write` in the project including a human's, so anything that is not one
+  of the three guarded agents passes through untouched. Verified live: a
+  main-session write to `test/` is allowed, the same write as `builder` is
+  blocked. A guarded agent whose guard script is missing blocks, so a broken
+  install cannot silently un-gate a restricted agent.
+- Per-agent frontmatter `hooks` blocks were left in place with a comment marking
+  them inert, so nobody mistakes them for live enforcement.
 - Guards strip a `.claude/worktrees/<name>/` prefix before matching. Without
   that, every pattern stops matching precisely when a background session is
   doing real work.

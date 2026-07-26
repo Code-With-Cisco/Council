@@ -72,7 +72,16 @@ enforce. Recorded here so they are not rediscovered or re-litigated later.
 These prompts define behavior, but write-capable agents still require hard
 runtime gates or `PreToolUse` hooks.
 
-Implemented in `scripts/gates/` and wired via each agent's `hooks` frontmatter:
+Implemented in `scripts/gates/` and registered in `.claude/settings.json`, which
+routes on the hook payload's `agent_type` to the right guard.
+
+**Not** wired via each agent's `hooks` frontmatter: that field is documented and
+accepted, but verified against Claude Code 2.1.220 it **does not fire** — on
+either the `--agent` path or the Agent-tool path. The frontmatter blocks are kept
+in the definitions, marked inert, for when the defect is fixed. See
+`scripts/gates/README.md` for the evidence.
+
+Boundaries enforced:
 
 - Builder: block writes to PRDs, epics, stories, tests, agent definitions, and
   other agents' memory.

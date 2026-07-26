@@ -4,7 +4,31 @@
 describe. Without these, every boundary in those prompts is advisory — a prompt
 asks an agent not to edit the tests; a guard stops it.
 
-Wired from each agent's frontmatter in `.claude/agents/`:
+## How they are wired, and why not the obvious way
+
+Registered **once** in `.claude/settings.json`, pointing at
+`agent-write-dispatch.sh`, which routes on the payload's `agent_type` to the
+right guard.
+
+The obvious wiring — a `hooks` block in each agent's frontmatter — **does not
+work**. Verified against Claude Code 2.1.220:
+
+| Attachment point | Result |
+|---|---|
+| Frontmatter `hooks`, agent run via `--agent` | **did not fire** — the blocked write succeeded |
+| Frontmatter `hooks`, agent spawned via the Agent tool | **did not fire** — an always-block probe on `Read` let the read through |
+| `settings.json` hook + dispatcher | **fires correctly** — blocks with the guard's own reason, no file created |
+
+This contradicts the documentation, which states that frontmatter hooks fire
+both when an agent is spawned through the Agent tool and when it runs as the main
+session via `--agent`. Re-test on a Claude Code upgrade; if frontmatter hooks
+start working, the per-agent blocks become the primary path and this dispatcher
+can go away.
+
+The frontmatter `hooks` blocks are still present in the three agent definitions,
+marked inert, as belt-and-braces for that day. **Do not rely on them today.**
+
+Guards and their owners:
 
 | Agent | Guard | Model |
 |---|---|---|
@@ -15,6 +39,22 @@ Wired from each agent's frontmatter in `.claude/agents/`:
 
 `_guard-lib.sh` holds the shared payload parsing, path resolution and pattern
 groups, so a fix lands in all three gates instead of drifting between them.
+
+## The dispatcher defaults to ALLOW, deliberately
+
+A `settings.json` hook fires for **every** `Edit` and `Write` in the project,
+including the ones you make yourself in an ordinary session. So
+`agent-write-dispatch.sh` allows anything whose `agent_type` is not one of the
+three guarded agents — an unrecognised agent, `reviewer`, a `council-*` advisor,
+or a plain human session. Default-deny there would gate your own work.
+
+Verified live: a main-session write to `test/` is allowed; the same write with
+`agent_type: builder` is blocked.
+
+The narrower fail-closed rule still applies **inside** each guard: once a
+restricted agent is identified, an unparseable payload or a missing `file_path`
+blocks. And if a guarded agent's guard script is missing or non-executable, the
+dispatcher blocks rather than silently un-gating that agent.
 
 ## Contract
 
