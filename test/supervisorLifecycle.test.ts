@@ -6,6 +6,7 @@ import type {
   StartSessionOutcome,
   StartSessionRequest,
 } from '../src/integration/client.js';
+import { ClaudeProviderAdapter } from '../src/integration/claudeProviderAdapter.js';
 import type { ClaudeClient } from '../src/integration/client.js';
 import { ClaudePaths } from '../src/integration/paths.js';
 import type {
@@ -262,7 +263,7 @@ function supervisor(
   ptyAvailable = false,
 ): ClaudeCodeAgentSupervisor {
   return new ClaudeCodeAgentSupervisor({
-    client,
+    provider: new ClaudeProviderAdapter(client, { ptyAvailable }),
     paths: new ClaudePaths({
       configDir: path.join(workspaceRoot, 'claude-config'),
     }),
@@ -277,7 +278,6 @@ function supervisor(
     resolveCatalog: async () => resolvedCatalog,
     validations,
     ...(councilProfileId === undefined ? {} : { councilProfileId }),
-    ptyAvailable,
     onSnapshot: vi.fn(),
   });
 }

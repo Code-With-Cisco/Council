@@ -13,8 +13,8 @@
  * truth about session state and there is no divergent in-app model to debug.
  */
 
-import type { ClaudeClient } from './client.js';
 import type { ClaudePaths } from './paths.js';
+import type { ClaudeRuntimeReader } from '../providers/contracts.js';
 import { readJobsSnapshot, type JobsSnapshot } from './fs/jobs.js';
 import { readAllTeams } from './fs/teams.js';
 import { listAgentDefinitions, validateAgentName } from './fs/agentDefs.js';
@@ -60,7 +60,7 @@ export interface Snapshot {
 }
 
 export interface RuntimeOptions {
-  readonly client: ClaudeClient;
+  readonly provider: ClaudeRuntimeReader;
   readonly paths: ClaudePaths;
   readonly config: RosterConfig;
   readonly bindings?: ReadonlyMap<string, SessionBindingRef> | undefined;
@@ -172,7 +172,7 @@ export class DecagramCouncilRuntime {
    * the machine-restart case can be shown to the user before anything respawns.
    */
   async boot(): Promise<BootReport> {
-    const daemonResult = await this.options.client.daemonStatus();
+    const daemonResult = await this.options.provider.daemonStatus();
     // A down daemon is the ordinary resting state in this version, so a failure
     // here is only about our ability to ask, not about the daemon's health.
     const daemon = daemonResult.ok ? daemonResult.value : undefined;
@@ -263,7 +263,7 @@ export class DecagramCouncilRuntime {
     daemon?: DaemonStatus | undefined,
   ): Promise<Snapshot> {
     const [rosterResult, jobs, teams] = await Promise.all([
-      this.options.client.listSessions({ all: true }),
+      this.options.provider.listSessions({ all: true }),
       readJobsSnapshot(this.options.paths),
       readAllTeams(this.options.paths),
     ]);

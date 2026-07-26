@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ClaudeClient } from '../src/integration/client.js';
+import { ClaudeProviderAdapter } from '../src/integration/claudeProviderAdapter.js';
 import { ClaudePaths } from '../src/integration/paths.js';
 import type { Session } from '../src/integration/types.js';
 import {
@@ -44,7 +45,7 @@ function emptyCatalog(): ResolvedAgentCatalog {
 function supervisorOptions(client: ClaudeClient, ptyAvailable: boolean) {
   const catalog = emptyCatalog();
   return {
-    client,
+    provider: new ClaudeProviderAdapter(client, { ptyAvailable }),
     paths: new ClaudePaths({ configDir: '/tmp/council-supervisor-test' }),
     config: { version: 2 as const, members: [], pollIntervalMs: 10_000 },
     bindings: new SessionBindingStore('/tmp/council-supervisor-bindings.json'),
@@ -56,7 +57,6 @@ function supervisorOptions(client: ClaudeClient, ptyAvailable: boolean) {
     catalog,
     resolveCatalog: async () => catalog,
     validations: new Map(),
-    ptyAvailable,
     onSnapshot: vi.fn(),
   };
 }

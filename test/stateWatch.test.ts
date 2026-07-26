@@ -2,10 +2,10 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ClaudeClient } from '../src/integration/client.js';
 import { ClaudeStateWatcher } from '../src/integration/fs/watch.js';
 import { ClaudePaths } from '../src/integration/paths.js';
 import { DecagramCouncilRuntime } from '../src/integration/runtime.js';
+import type { ClaudeRuntimeReader } from '../src/providers/contracts.js';
 
 interface NativeWatcher {
   emit(event: 'error', error: unknown): boolean;
@@ -80,7 +80,7 @@ describe('ClaudeStateWatcher diagnostics', () => {
     const paths = await createPaths();
     const onError = vi.fn();
     const runtime = new DecagramCouncilRuntime({
-      client: {} as ClaudeClient,
+      provider: {} as ClaudeRuntimeReader,
       paths,
       config: { version: 2, members: [], pollIntervalMs: 10_000 },
       onSnapshot: () => undefined,

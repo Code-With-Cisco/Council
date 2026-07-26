@@ -19,6 +19,7 @@ import {
 } from '../config/appConfig.js';
 import type { CliResult } from '../integration/types.js';
 import { ClaudeClient } from '../integration/client.js';
+import { ClaudeProviderAdapter } from '../integration/claudeProviderAdapter.js';
 import { AgentDefinitionWatcher } from '../integration/fs/agentWatch.js';
 import { ClaudePaths } from '../integration/paths.js';
 import { runLaunchPreflight, type LaunchPreflight } from '../integration/preflight.js';
@@ -681,8 +682,11 @@ async function activateWorkspace(
 
   if (preflight.claude !== null && preflight.claude.meetsMinimum) {
     const client = ClaudeClient.fromBinary(preflight.claude.bin);
+    const provider = new ClaudeProviderAdapter(client, {
+      ptyAvailable: preflight.ptyAvailable,
+    });
     const created = new ClaudeCodeAgentSupervisor({
-      client,
+      provider,
       paths: claudePaths,
       config: profiles.config,
       bindings: bindingStore,
@@ -696,7 +700,6 @@ async function activateWorkspace(
       validations: profiles.validations,
       catalogProblems: profiles.catalogProblems,
       councilProfileId: profiles.councilProfileId,
-      ptyAvailable: preflight.ptyAvailable,
       onSnapshot: (snapshot) => {
         if (isActivationCurrent(generation, context)) publishSnapshot(snapshot);
       },

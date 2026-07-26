@@ -1,6 +1,6 @@
-import type { ClaudeClient, StartSessionOutcome } from '../integration/client.js';
+import type { StartSessionOutcome } from '../integration/client.js';
 import type { ClaudePaths } from '../integration/paths.js';
-import { sendReply, type ReplyOutcome } from '../integration/pty/attach.js';
+import type { ReplyOutcome } from '../integration/pty/attach.js';
 import {
   DecagramCouncilRuntime,
   type BootReport,
@@ -20,6 +20,10 @@ import type {
   Session,
   SessionBindingRef,
 } from '../integration/types.js';
+import type {
+  AgentProviderAdapter,
+  ClaudeRuntimeReader,
+} from '../providers/contracts.js';
 import type { ResolvedAgentCatalog } from './catalog.js';
 import {
   SafeLaunchCoordinator,
@@ -28,11 +32,12 @@ import {
 import {
   type SessionBindingRecord,
   type SessionBindingStore,
+  type SessionProviderId,
 } from './sessionBindings.js';
 import type { AgentRuntimeCapabilities, AgentSupervisorPort } from './contracts.js';
 
 export interface ClaudeCodeAgentSupervisorOptions {
-  readonly client: ClaudeClient;
+  readonly provider: AgentProviderAdapter<SessionProviderId> & ClaudeRuntimeReader;
   readonly paths: ClaudePaths;
   readonly config: RosterConfig;
   readonly bindings: SessionBindingStore;
@@ -43,7 +48,6 @@ export interface ClaudeCodeAgentSupervisorOptions {
   readonly validations: ReadonlyMap<string, AgentValidation>;
   readonly catalogProblems?: readonly ParseProblem[] | undefined;
   readonly councilProfileId?: string | undefined;
-  readonly ptyAvailable: boolean;
   readonly onSnapshot: RuntimeOptions['onSnapshot'];
   readonly onHook?: RuntimeOptions['onHook'];
   readonly onNeedsInput?: RuntimeOptions['onNeedsInput'];
@@ -95,16 +99,16 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
     this.catalogProblems = options.catalogProblems ?? [];
     this.councilProfileId = options.councilProfileId;
     this.capabilities = {
-      start: true,
-      stop: true,
-      logs: true,
-      plainTextReply: options.ptyAvailable,
+      start: options.provider.capabilities.start,
+      stop: options.provider.capabilities.stop,
+      logs: options.provider.capabilities.logs,
+      plainTextReply: options.provider.capabilities.plainTextReply,
       interactiveTerminal: false,
-      persistentSessions: true,
+      persistentSessions: options.provider.capabilities.persistentSessions,
       councilReview: options.councilProfileId !== undefined,
     };
     this.runtime = new DecagramCouncilRuntime({
-      client: options.client,
+      provider: options.provider,
       paths: options.paths,
       config: this.config,
       bindings: this.bindingMap(),
@@ -117,7 +121,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
       ...(options.onError === undefined ? {} : { onError: options.onError }),
     });
     this.launchCoordinator = new SafeLaunchCoordinator({
-      client: options.client,
+      provider: options.provider,
       bindings: options.bindings,
       workspace: options.workspace,
       resolveProfile: (profileId) =>
@@ -138,7 +142,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
           diagnostic: entry.launchability.message,
         };
       },
-      verifyCapability: () => options.client.verifyLaunchCapability(),
+      verifyCapability: () => options.provider.verifyLaunchCapability(),
       refresh: async () => {
         this.syncRuntimeProjection(false);
         return (await this.runtime.refresh()).roster.sessions;
@@ -206,7 +210,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
       this.launchCoordinator.exactBoundSessionAction(profileId, {
         actionName: 'Stop',
         missingMessage: 'That profile has no exact active session binding.',
-        action: (session) => this.options.client.stop(session.id!),
+        action: (session) => this.options.provider.stopSession(session.id!),
       }),
     );
   }
@@ -246,7 +250,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
       this.launchCoordinator.exactBoundSessionAction(profileId, {
         actionName: 'Logs',
         missingMessage: 'That profile has no exact session binding.',
-        action: (session) => this.options.client.logs(session.id!),
+        action: (session) => this.options.provider.readLogs(session.id!),
       }),
     );
   }
@@ -268,7 +272,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
               ['attach', session.id!],
             );
           }
-          return sendReply(this.options.client.cli.bin, session.id!, message);
+          return this.options.provider.sendReply(session.id!, message);
         },
       });
     });

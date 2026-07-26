@@ -46,6 +46,8 @@ export type {
   StartSessionOutcome,
   StartSessionRequest,
 } from './client.js';
+export { ClaudeProviderAdapter } from './claudeProviderAdapter.js';
+export type { ClaudeProviderAdapterOptions } from './claudeProviderAdapter.js';
 
 export {
   MINIMUM_CLAUDE_VERSION,

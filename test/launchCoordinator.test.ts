@@ -7,13 +7,12 @@ import type {
   StartSessionRequest,
 } from '../src/integration/client.js';
 import type { CliFailure, CliResult, RosterMember, Session } from '../src/integration/types.js';
-import {
-  SafeLaunchCoordinator,
-  type LaunchClient,
-} from '../src/supervisor/launchCoordinator.js';
+import type { AgentProviderAdapter } from '../src/providers/contracts.js';
+import { SafeLaunchCoordinator } from '../src/supervisor/launchCoordinator.js';
 import {
   SessionBindingStore,
   type SessionBindingRecord,
+  type SessionProviderId,
 } from '../src/supervisor/sessionBindings.js';
 
 const roots: string[] = [];
@@ -70,7 +69,7 @@ function session(
 interface Fixture {
   readonly coordinator: SafeLaunchCoordinator;
   readonly store: SessionBindingStore;
-  readonly client: LaunchClient;
+  readonly client: AgentProviderAdapter<SessionProviderId>;
   readonly starts: ReturnType<typeof vi.fn<(request: StartSessionRequest) => Promise<CliResult<StartSessionOutcome>>>>;
   readonly stops: ReturnType<typeof vi.fn<(id: string) => Promise<CliResult<string>>>>;
   readonly respawns: ReturnType<typeof vi.fn<(id: string) => Promise<CliResult<string>>>>;
@@ -139,8 +138,23 @@ async function fixture(
     argv: ['respawn', id],
     durationMs: 1,
   }));
-  const client: LaunchClient = {
-    start: starts,
+  const client: AgentProviderAdapter<SessionProviderId> = {
+    providerId: 'claude-code',
+    capabilities: {
+      start: true,
+      stop: true,
+      logs: true,
+      plainTextReply: false,
+      persistentSessions: true,
+    },
+    verifyLaunchCapability: async () => ({
+      ok: true,
+      value: 'ready',
+      raw: '',
+      argv: ['--version'],
+      durationMs: 1,
+    }),
+    startSession: starts,
     listSessions: async () => ({
       ok: true,
       value: [...sessions],
@@ -148,8 +162,22 @@ async function fixture(
       argv: ['agents', '--json', '--all'],
       durationMs: 1,
     }),
-    stop: stops,
-    respawn: respawns,
+    stopSession: stops,
+    resumeSession: respawns,
+    readLogs: async (id) => ({
+      ok: true,
+      value: `logs ${id}`,
+      raw: '',
+      argv: ['logs', id],
+      durationMs: 1,
+    }),
+    sendReply: async (id) => ({
+      ok: true,
+      value: { transcript: id, acknowledged: true },
+      raw: '',
+      argv: ['attach', id],
+      durationMs: 1,
+    }),
   };
   const verifyCapability = vi.fn(
     overrides.verifyCapability ??
@@ -167,7 +195,7 @@ async function fixture(
   await store.load();
   const refresh = vi.fn(async (): Promise<readonly Session[]> => [...sessions]);
   const coordinator = new SafeLaunchCoordinator({
-    client,
+    provider: client,
     bindings: store,
     workspace: {
       id: profile.workspaceId!,

@@ -2,11 +2,7 @@ import { access, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
-import type {
-  ClaudeClient,
-  StartSessionOutcome,
-  StartSessionRequest,
-} from '../integration/client.js';
+import type { StartSessionOutcome } from '../integration/client.js';
 import type {
   CliFailure,
   CliFailureKind,
@@ -15,12 +11,13 @@ import type {
   Session,
 } from '../integration/types.js';
 import { detectUnknownAgentWarning } from '../integration/cli/errors.js';
+import type { AgentProviderAdapter } from '../providers/contracts.js';
 import {
-  CLAUDE_CODE_PROVIDER_ID,
   resolveExactBindingSession,
   type PendingLaunchRecord,
   type SessionBindingRecord,
   type SessionBindingStore,
+  type SessionProviderId,
 } from './sessionBindings.js';
 
 export interface LaunchDefinitionResolution {
@@ -39,15 +36,8 @@ export interface LaunchWorkspace {
   readonly trusted: boolean;
 }
 
-export interface LaunchClient {
-  start(request: StartSessionRequest): Promise<CliResult<StartSessionOutcome>>;
-  listSessions(options?: { all?: boolean; cwd?: string }): Promise<CliResult<Session[]>>;
-  stop(id: string): Promise<CliResult<string>>;
-  respawn(id: string): Promise<CliResult<string>>;
-}
-
 export interface SafeLaunchCoordinatorOptions {
-  readonly client: LaunchClient | ClaudeClient;
+  readonly provider: AgentProviderAdapter<SessionProviderId>;
   readonly bindings: SessionBindingStore;
   readonly workspace: LaunchWorkspace;
   readonly resolveProfile: (profileId: string) => RosterMember | undefined;
@@ -261,7 +251,7 @@ export class SafeLaunchCoordinator {
       return failure('That binding is not authorized for the active workspace.');
     }
 
-    const sessions = await this.options.client.listSessions({ all: true });
+    const sessions = await this.options.provider.listSessions({ all: true });
     if (!sessions.ok) return sessions;
     const session = resolveExactBindingSession(binding, sessions.value);
     if (session?.id === undefined) return failure(options.missingMessage);
@@ -319,7 +309,7 @@ export class SafeLaunchCoordinator {
     ) {
       return failure('That binding is not authorized for the active workspace.');
     }
-    const sessions = await this.options.client.listSessions({ all: true });
+    const sessions = await this.options.provider.listSessions({ all: true });
     if (!sessions.ok) return sessions;
     const session = resolveExactBindingSession(binding, sessions.value);
     if (session?.id === undefined) {
@@ -357,7 +347,7 @@ export class SafeLaunchCoordinator {
         durationMs: 0,
       };
     }
-    return this.options.client.respawn(session.id);
+    return this.options.provider.resumeSession(session.id);
   }
 
   clearBinding(profileId: string): Promise<CliResult<string>> {
@@ -406,7 +396,7 @@ export class SafeLaunchCoordinator {
       };
     }
 
-    const sessions = await this.options.client.listSessions({ all: true });
+    const sessions = await this.options.provider.listSessions({ all: true });
     if (!sessions.ok) return sessions;
     const exactSession = resolveExactBindingSession(binding, sessions.value);
     if (exactSession !== undefined) {
@@ -483,7 +473,7 @@ export class SafeLaunchCoordinator {
     ).filter((pending) => pending.workspaceId === this.options.workspace.id);
     if (pendingLaunches.length === 0) return;
 
-    const listed = await this.options.client.listSessions({ all: true });
+    const listed = await this.options.provider.listSessions({ all: true });
     if (!listed.ok) return;
 
     for (const pending of pendingLaunches) {
@@ -577,7 +567,7 @@ export class SafeLaunchCoordinator {
       return failure('Trust this workspace before launching its agent instructions.');
     }
 
-    const listed = await this.options.client.listSessions({ all: true });
+    const listed = await this.options.provider.listSessions({ all: true });
     if (!listed.ok) return listed;
 
     const existingBinding = this.options.bindings.getBinding(profileId);
@@ -737,7 +727,7 @@ export class SafeLaunchCoordinator {
     const createdAt = this.now().toISOString();
     const uniqueLaunchName = `dc-${profileId.slice(-12)}-${this.uniqueId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24)}`;
     const pendingLaunch: PendingLaunchRecord = {
-      providerId: CLAUDE_CODE_PROVIDER_ID,
+      providerId: this.options.provider.providerId,
       workspaceId: this.options.workspace.id,
       profileId,
       uniqueLaunchName,
@@ -801,7 +791,7 @@ export class SafeLaunchCoordinator {
       );
     }
 
-    const result = await this.options.client.start({
+    const result = await this.options.provider.startSession({
       agent: launchDefinition.agentName,
       name: uniqueLaunchName,
       cwd: canonicalCwd,
@@ -829,7 +819,7 @@ export class SafeLaunchCoordinator {
         );
       }
       if (result.kind === 'timeout' || result.kind === 'malformed-output') {
-        const after = await this.options.client.listSessions({ all: true });
+        const after = await this.options.provider.listSessions({ all: true });
         if (after.ok) {
           const recovered = await this.reconcilePending(
             profile,
@@ -900,7 +890,7 @@ export class SafeLaunchCoordinator {
       );
     }
 
-    const postLaunch = await this.options.client.listSessions({ all: true });
+    const postLaunch = await this.options.provider.listSessions({ all: true });
     const acknowledgedMatches = postLaunch.ok
       ? postLaunch.value.filter((session) => session.id === result.value.id)
       : [];
@@ -928,7 +918,7 @@ export class SafeLaunchCoordinator {
       actualCanonicalCwd !== undefined &&
       !samePath(actualCanonicalCwd, canonicalCwd, this.platform)
     ) {
-      const cleanup = await this.options.client.stop(result.value.id);
+      const cleanup = await this.options.provider.stopSession(result.value.id);
       await this.options.bindings
         .clearPendingLaunch(profileId, pendingLaunch)
         .catch(() => undefined);
@@ -943,7 +933,7 @@ export class SafeLaunchCoordinator {
       );
     }
     const binding: SessionBindingRecord = {
-      providerId: CLAUDE_CODE_PROVIDER_ID,
+      providerId: this.options.provider.providerId,
       workspaceId: this.options.workspace.id,
       profileId,
       shortSessionId: result.value.id,
@@ -967,7 +957,7 @@ export class SafeLaunchCoordinator {
         await this.options.bindings.replaceBinding(binding, existingBinding);
       }
     } catch (error) {
-      const cleanup = await this.options.client.stop(result.value.id);
+      const cleanup = await this.options.provider.stopSession(result.value.id);
       let journalMessage = 'cleared the pending launch journal';
       try {
         await this.options.bindings.clearPendingLaunch(
@@ -1020,7 +1010,7 @@ export class SafeLaunchCoordinator {
     const shortSessionId = session.id;
     if (shortSessionId === undefined) return undefined;
     const binding: SessionBindingRecord = {
-      providerId: CLAUDE_CODE_PROVIDER_ID,
+      providerId: this.options.provider.providerId,
       workspaceId: pending.workspaceId,
       profileId: profile.key,
       shortSessionId,
@@ -1133,7 +1123,7 @@ export class SafeLaunchCoordinator {
 
     let sessions = knownSessions;
     if (sessions === undefined) {
-      const listed = await this.options.client.listSessions({ all: true });
+      const listed = await this.options.provider.listSessions({ all: true });
       if (!listed.ok) {
         return {
           cleared: false,
@@ -1174,7 +1164,7 @@ export class SafeLaunchCoordinator {
       };
     }
 
-    const cleanup = await this.options.client.stop(candidates[0].id);
+    const cleanup = await this.options.provider.stopSession(candidates[0].id);
     if (!cleanup.ok) {
       return {
         cleared: false,

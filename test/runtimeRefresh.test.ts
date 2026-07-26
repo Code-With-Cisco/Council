@@ -2,7 +2,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ClaudeClient } from '../src/integration/client.js';
 import { ClaudePaths } from '../src/integration/paths.js';
 import { DecagramCouncilRuntime } from '../src/integration/runtime.js';
 import type {
@@ -11,6 +10,7 @@ import type {
   Session,
   SessionBindingRef,
 } from '../src/integration/types.js';
+import type { ClaudeRuntimeReader } from '../src/providers/contracts.js';
 
 const roots: string[] = [];
 
@@ -100,7 +100,7 @@ describe('authoritative runtime refresh ordering', () => {
     );
     const published: string[] = [];
     const runtime = new DecagramCouncilRuntime({
-      client: { listSessions } as unknown as ClaudeClient,
+      provider: { listSessions } as unknown as ClaudeRuntimeReader,
       paths: new ClaudePaths({ configDir: root }),
       config: { version: 2, members: [], pollIntervalMs: 10_000 },
       onSnapshot: (snapshot) => {
@@ -126,9 +126,9 @@ describe('authoritative runtime refresh ordering', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'council-runtime-refresh-'));
     roots.push(root);
     const runtime = new DecagramCouncilRuntime({
-      client: {
+      provider: {
         listSessions: vi.fn().mockResolvedValue(rosterFailure()),
-      } as unknown as ClaudeClient,
+      } as unknown as ClaudeRuntimeReader,
       paths: new ClaudePaths({ configDir: root }),
       config: {
         version: 2,
@@ -166,7 +166,7 @@ describe('authoritative runtime refresh ordering', () => {
       .mockResolvedValueOnce(rosterResult(session('bound-session')))
       .mockResolvedValueOnce(rosterFailure());
     const runtime = new DecagramCouncilRuntime({
-      client: { listSessions } as unknown as ClaudeClient,
+      provider: { listSessions } as unknown as ClaudeRuntimeReader,
       paths: new ClaudePaths({ configDir: root }),
       config: {
         version: 2,

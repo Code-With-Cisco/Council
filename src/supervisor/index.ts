@@ -4,6 +4,11 @@ export type {
   AgentRuntimeCapabilities,
   AgentSupervisorPort,
 } from './contracts.js';
+export type {
+  AgentProviderAdapter,
+  AgentProviderCapabilities,
+  ClaudeRuntimeReader,
+} from '../providers/contracts.js';
 export { SafeLaunchCoordinator } from './launchCoordinator.js';
 export type {
   LaunchDefinitionResolution,
