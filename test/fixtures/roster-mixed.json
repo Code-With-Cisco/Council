@@ -1,7 +1,7 @@
 [
   {
     "pid": 6469,
-    "cwd": "/Users/cisco/Documents/GitHub/Council",
+    "cwd": "C:\\Users\\User\\Documents\\GitHub\\Council",
     "kind": "interactive",
     "startedAt": 1785023767217,
     "sessionId": "5e501e5b-dfaa-4156-beb2-38708653b2fc",
@@ -9,7 +9,7 @@
   },
   {
     "pid": 6468,
-    "cwd": "/Users/cisco/Documents/GitHub/Council",
+    "cwd": "C:\\Users\\User\\Documents\\GitHub\\Council",
     "kind": "interactive",
     "startedAt": 1785023767218,
     "sessionId": "3a322daa-4fa6-4650-ab19-b9836e25a4ec",
@@ -17,7 +17,7 @@
   },
   {
     "id": "e1f523d7",
-    "cwd": "/private/tmp/scratch",
+    "cwd": "C:\\Users\\User\\AppData\\Local\\Temp\\scratch",
     "kind": "background",
     "startedAt": 1785025576080,
     "sessionId": "e1f523d7-e83b-46b8-9eca-538f4e74e609",

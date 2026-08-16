@@ -140,21 +140,21 @@ describe('parseStartedSession', () => {
 
 describe('parseDaemonStatus', () => {
   it('reads a running daemon', () => {
-    const status = parseDaemonStatus(readFixture('daemon-status-running.txt'));
+    const status = parseDaemonStatus(readFixture('daemon-status-running-windows.txt'));
     expect(status.recognized).toBe(true);
     expect(status.running).toBe(true);
-    expect(status.pid).toBe(9806);
-    expect(status.version).toBe('2.1.220');
+    expect(status.pid).toBe(5976);
+    expect(status.version).toBe('2.1.233');
     expect(status.controlSocketReachable).toBe(true);
     expect(status.workerCount).toBe(1);
     expect(status.rosterPresent).toBe(true);
-    expect(status.socketDir).toBe('/tmp/cc-daemon-501/1d662268');
+    expect(status.socketDir).toBe('\\\\.\\pipe\\cc-daemon-*');
   });
 
   it('reads a stopped daemon without treating it as an error', () => {
     // Service install is disabled in v2.1.220: the supervisor starts on demand
     // and exits when the last client disconnects, so this is the resting state.
-    const status = parseDaemonStatus(readFixture('daemon-status-stopped.txt'));
+    const status = parseDaemonStatus(readFixture('daemon-status-stopped-windows.txt'));
     expect(status.recognized).toBe(true);
     expect(status.running).toBe(false);
     expect(status.pid).toBeUndefined();
@@ -240,6 +240,14 @@ describe('parseDaemonStatus', () => {
 });
 
 describe('classifyOutput', () => {
+  it('does not classify ordinary agent log prose as a CLI failure', () => {
+    expect(
+      classifyOutput(
+        "I couldn't read logs for yesterday, and the daemon is not running in production.",
+        0,
+      ),
+    ).toBeNull();
+  });
   it('detects an unknown session despite exit code 0', () => {
     // The reason this whole classifier exists.
     const raw = "No job matching 'zzzzzzzz'. Run 'claude agents' to list running sessions.";

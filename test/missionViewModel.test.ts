@@ -26,7 +26,7 @@ async function viewModel(): Promise<{
   );
   const window: Record<string, unknown> = {};
   runInNewContext(source, { window });
-  return window['CouncilMissionViewModel'] as Awaited<
+  return window['DecagramCouncilMissionViewModel'] as Awaited<
     ReturnType<typeof viewModel>
   >;
 }

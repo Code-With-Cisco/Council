@@ -1,8 +1,0 @@
-not running
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/1d662268
-  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/1d662268/control.sock)
-  bg workers:   0 in roster.json (control unreachable)
-  roster.json:  absent
-  daemon.log:   absent

@@ -79,7 +79,7 @@ describe('ClaudeCodeAgentSupervisor', () => {
     });
   });
 
-  it('allows one-line reply only for an exact ordinary-text wait state', () => {
+  it('allows ordinary input and resumable terminal replies but preserves an explicit stop', () => {
     const waiting = {
       id: 'exact001',
       state: 'blocked',
@@ -100,6 +100,8 @@ describe('ClaudeCodeAgentSupervisor', () => {
     expect(
       isSafePlainTextReplyState({ ...waiting, state: 'stopped' } as Session),
     ).toBe(false);
+    expect(isSafePlainTextReplyState({ ...waiting, state: 'done' } as Session)).toBe(true);
+    expect(isSafePlainTextReplyState({ ...waiting, state: 'failed' } as Session)).toBe(true);
   });
 
   it('rejects unknown profile and session ids before invoking the CLI', async () => {

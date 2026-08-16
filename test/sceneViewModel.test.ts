@@ -52,7 +52,7 @@ async function mapper(): Promise<{
   const window: Record<string, unknown> = {};
   runInNewContext(missionSource, { window });
   runInNewContext(source, { window });
-  return window['CouncilSceneViewModel'] as Awaited<ReturnType<typeof mapper>>;
+  return window['DecagramCouncilSceneViewModel'] as Awaited<ReturnType<typeof mapper>>;
 }
 
 function slot(overrides: Record<string, unknown> = {}) {
@@ -231,6 +231,35 @@ describe('Snapshot -> pixel office scene view model', () => {
     );
 
     expect(actions.clear).toBe(false);
+  });
+
+  it('offers reply for resumable terminal sessions but not explicitly stopped sessions', async () => {
+    const view = await mapper();
+    const ready = {
+      workspaceReady: true,
+      trusted: true,
+      capabilities: { plainTextReply: true },
+    };
+    for (const state of ['done', 'failed']) {
+      expect(
+        view.actionState(
+          slot({
+            session: { id: 'bound123', state },
+            bindingState: state === 'failed' ? 'failed' : 'terminal',
+          }),
+          ready,
+        ).reply,
+      ).toBe(true);
+    }
+    expect(
+      view.actionState(
+        slot({
+          session: { id: 'bound123', state: 'stopped' },
+          bindingState: 'terminal',
+        }),
+        ready,
+      ).reply,
+    ).toBe(false);
   });
 
   it('does not offer Clear while the durable binding store is malformed', async () => {

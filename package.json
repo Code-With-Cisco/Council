@@ -20,7 +20,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build && electron .",
     "pack:win": "npm run build && electron-builder --win dir",
-    "dist:win": "npm run build && electron-builder --win nsis"
+    "dist:win": "npm run build && electron-builder --win",
+    "build:icon": "powershell.exe -NoProfile -NonInteractive -File scripts/build-icon.ps1"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
@@ -41,6 +42,7 @@
     "appId": "com.decagram.council",
     "productName": "Decagram Council",
     "asar": true,
+    "npmRebuild": false,
     "files": [
       "dist/src/**/*",
       "src/ui/preload.cjs",
@@ -57,14 +59,17 @@
         {
           "target": "nsis",
           "arch": [
-            "x64"
+            "x64",
+            "arm64"
           ]
         }
       ],
+      "icon": "build/icon.ico",
       "executableName": "Decagram Council"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

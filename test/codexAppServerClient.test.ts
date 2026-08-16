@@ -79,9 +79,9 @@ class FakeConnection implements CodexAppServerConnection {
 
 const initializeResult = {
   userAgent: 'codex-cli/0.146.0',
-  codexHome: '/tmp/codex-home',
-  platformFamily: 'unix',
-  platformOs: 'macos',
+  codexHome: 'C:\\Users\\User\\.codex',
+  platformFamily: 'windows',
+  platformOs: 'windows',
 };
 
 const authenticatedAccount = {

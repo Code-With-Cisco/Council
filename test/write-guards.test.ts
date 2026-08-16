@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,13 +66,15 @@ const payload = (
   root: string,
   agentType: string | undefined,
   target: string,
+  tool: 'Edit' | 'Write' = 'Write',
+  edit?: { old_string: string; new_string: string },
 ): string =>
   JSON.stringify({
     hook_event_name: 'PreToolUse',
     ...(agentType === undefined ? {} : { agent_type: agentType }),
     cwd: root,
-    tool_name: 'Write',
-    tool_input: { file_path: target },
+    tool_name: tool,
+    tool_input: { file_path: target, ...edit },
   });
 
 describe('PowerShell write-guard source', () => {
@@ -91,6 +93,8 @@ describe('PowerShell write-guard source', () => {
 describe.skipIf(POWERSHELL === undefined)(
   'PowerShell write guards (skipped when PowerShell is unavailable)',
   () => {
+    const GUARD_TIMEOUT_MS = 60_000;
+
     it('allows Builder production changes and blocks test changes', async () => {
       const root = await project();
       expect(
@@ -121,7 +125,78 @@ describe.skipIf(POWERSHELL === undefined)(
         );
         expect(result.code).toBe(2);
       }
-    });
+    }, GUARD_TIMEOUT_MS);
+
+    it('resolves the nearest existing junction before allowing a new target', async () => {
+      const root = await project();
+      const outside = await mkdtemp(path.join(tmpdir(), 'decagram-guard-outside-'));
+      cleanups.push(() => rm(outside, { recursive: true, force: true }));
+      const junction = path.join(root, 'src', 'linked');
+      await symlink(outside, junction, 'junction');
+      const result = await run(
+        DISPATCHER,
+        root,
+        payload(root, 'builder', path.join(junction, 'new-file.ts')),
+      );
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('outside the project');
+    }, GUARD_TIMEOUT_MS);
+
+    it('enforces story ownership at field level', async () => {
+      const root = await project();
+      await mkdir(path.join(root, 'stories'), { recursive: true });
+      const storyPath = path.join(root, 'stories', 'DC-101.md');
+      await writeFile(storyPath, '---\nacceptance: npm test\nstatus: ready\n---\n');
+
+      const acceptance = await run(
+        DISPATCHER,
+        root,
+        payload(root, 'test-engineer', storyPath, 'Edit', {
+          old_string: 'acceptance: npm test',
+          new_string: 'acceptance: npm test -- DC-101',
+        }),
+      );
+      expect(acceptance.code).toBe(0);
+
+      const status = await run(
+        DISPATCHER,
+        root,
+        payload(root, 'test-engineer', storyPath, 'Edit', {
+          old_string: 'status: ready',
+          new_string: 'status: done',
+        }),
+      );
+      expect(status.code).toBe(2);
+
+      const prdAcceptance = await run(
+        DISPATCHER,
+        root,
+        payload(root, 'prd-lead', storyPath, 'Edit', {
+          old_string: 'acceptance: npm test',
+          new_string: 'acceptance: exit 0',
+        }),
+      );
+      expect(prdAcceptance.code).toBe(2);
+    }, GUARD_TIMEOUT_MS);
+
+    it('converts an unexpected guarded child exit into Claude blocking code 2', async () => {
+      const root = await project();
+      const hooks = path.join(root, 'hooks');
+      await mkdir(hooks, { recursive: true });
+      await copyFile(DISPATCHER, path.join(hooks, 'agent-write-dispatch.ps1'));
+      await copyFile(
+        path.join(REPO_ROOT, 'scripts', 'gates', '_guard-lib.ps1'),
+        path.join(hooks, '_guard-lib.ps1'),
+      );
+      await writeFile(path.join(hooks, 'builder-write-guard.ps1'), 'exit 7\n');
+      const result = await run(
+        path.join(hooks, 'agent-write-dispatch.ps1'),
+        root,
+        payload(root, 'builder', path.join(root, 'src', 'client.ts')),
+      );
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('failed unexpectedly with exit 7');
+    }, GUARD_TIMEOUT_MS);
 
     it('allows a human session and blocks an outside absolute path', async () => {
       const root = await project();

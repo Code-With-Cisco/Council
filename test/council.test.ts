@@ -24,15 +24,16 @@ describe('council agent definitions', () => {
       expect(frontmatter?.['mode']).toBe('internal');
       expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
       expect(frontmatter?.['permissionMode']).toBeUndefined();
-      expect(source).toContain('final output and address nobody');
+      expect(source).toContain('final output');
+      expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
     }
   });
 
-  it('keeps chairman in plan mode with the same read-only tools', async () => {
+  it('makes chairman read-only through tools rather than an inherited permission mode', async () => {
     const source = await readFile(path.join(AGENT_DIR, 'council-chairman.md'), 'utf8');
     const frontmatter = parseFrontmatter(source);
     expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
-    expect(frontmatter?.['permissionMode']).toBe('plan');
+    expect(frontmatter?.['permissionMode']).toBeUndefined();
     expect(frontmatter?.['mode']).toBe('internal');
   });
 
@@ -47,6 +48,24 @@ describe('council agent definitions', () => {
     expect(source).toContain('five substantive responses');
     expect(source).toContain('Response A');
     expect(source).toContain('chairman');
+    expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
+    expect(source).toContain('independently started Claude sessions');
+  });
+
+  it('keeps routing metadata in descriptions rather than prompt-body trailers', async () => {
+    const names = [...ADVISORS, 'council-chairman'] as const;
+    const descriptions = new Set<string>();
+    for (const name of names) {
+      const source = await readFile(path.join(AGENT_DIR, `${name}.md`), 'utf8');
+      const frontmatter = parseFrontmatter(source);
+      const description = frontmatter?.['description'];
+      expect(typeof description).toBe('string');
+      expect(String(description)).toMatch(/Use (?:only )?as|Use as/);
+      expect(source).not.toContain('SHOULD route:');
+      expect(source).not.toContain('SHOULD NOT route:');
+      expect(descriptions.has(String(description))).toBe(false);
+      descriptions.add(String(description));
+    }
   });
 });
 

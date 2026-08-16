@@ -39,11 +39,20 @@ function run(
   projectDir: string,
   agentType: string | undefined,
   command: string,
+  explicitAgentType?: 'builder' | 'test-engineer',
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       POWERSHELL!,
-      ['-NoProfile', '-NonInteractive', '-File', DISPATCHER],
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        DISPATCHER,
+        ...(explicitAgentType === undefined
+          ? []
+          : ['-AgentType', explicitAgentType]),
+      ],
       {
         env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
         stdio: ['pipe', 'ignore', 'pipe'],
@@ -122,6 +131,25 @@ describe.skipIf(POWERSHELL === undefined)(
       ]) {
         expect((await run(root, 'builder', command)).code).toBe(2);
       }
+    }, GUARD_TIMEOUT_MS);
+
+    it('blocks inline interpreter writes', async () => {
+      const root = await project();
+      for (const command of [
+        "node -e \"require('fs').writeFileSync('x','y')\"",
+        "python -c \"open('x','w').write('y')\"",
+        'cmd /c echo y> x',
+        'powershell -Command Set-Content x y',
+      ]) {
+        expect((await run(root, 'builder', command)).code).toBe(2);
+      }
+    }, GUARD_TIMEOUT_MS);
+
+    it('uses the direct-hook identity when main-session payload omits agent_type', async () => {
+      const root = await project();
+      expect(
+        (await run(root, undefined, 'Set-Content x y', 'builder')).code,
+      ).toBe(2);
     }, GUARD_TIMEOUT_MS);
 
     it('does not gate an unguarded agent or human session', async () => {

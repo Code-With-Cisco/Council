@@ -25,7 +25,6 @@ describe('Codex executable discovery', () => {
     const located = await locateCodex({
       override,
       home: path.resolve('/home', 'person'),
-      platform: 'linux',
       exists: async () => true,
       probe,
     });
@@ -43,7 +42,6 @@ describe('Codex executable discovery', () => {
     const located = await locateCodex({
       override: path.resolve('/missing', 'codex'),
       home: path.resolve('/home', 'person'),
-      platform: 'win32',
       exists: async () => false,
       probe: async (executable) => {
         probes.push(executable);
@@ -67,7 +65,6 @@ describe('Codex executable discovery', () => {
     expect(
       await locateCodex({
         home: path.resolve('/home', 'person'),
-        platform: 'linux',
         exists: async () => false,
         probe: async () => ({ ok: false, output: 'missing', missing: true }),
       }),

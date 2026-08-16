@@ -8,7 +8,7 @@ import { IPC_CHANNELS } from '../src/ui/ipc.js';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('Windows Electron shell', () => {
-  it('packages only an x64 NSIS Windows target with the final app id', async () => {
+  it('packages only x64 and arm64 NSIS Windows targets with the final app id', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'),
     ) as Record<string, unknown>;
@@ -17,7 +17,10 @@ describe('Windows Electron shell', () => {
     const target = win['target'] as { target: string; arch: string[] }[];
 
     expect(build['appId']).toBe('com.decagram.council');
-    expect(target).toEqual([{ target: 'nsis', arch: ['x64'] }]);
+    expect(build['npmRebuild']).toBe(false);
+    expect(target).toEqual([{ target: 'nsis', arch: ['x64', 'arm64'] }]);
+    expect(win['icon']).toBe('build/icon.ico');
+    expect((build['nsis'] as Record<string, unknown>)['perMachine']).toBe(false);
     expect(build['mac']).toBeUndefined();
     expect(build['linux']).toBeUndefined();
   });
@@ -53,6 +56,7 @@ describe('Windows Electron shell', () => {
     expect(main).not.toContain('path.resolve(cwd)');
     expect(ipc).not.toContain("from '../integration/preflight.js'");
     expect(ipc).not.toContain('readonly executable');
+    expect(ipc).toContain('readonly resolvedPath');
     expect(ipc).not.toContain('hookConfig');
     expect(ipc).not.toContain('readonly interpreter');
     expect(missionUi).toContain('readonly providerId: UiMissionProviderId');
@@ -129,7 +133,7 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('snapshot?.roster.squad');
     expect(renderer).toContain('profileActions.stop(slot.member.key)');
     expect(renderer).toContain('profileActions.resume(slot.member.key)');
-    expect(renderer).toContain('CouncilSceneViewModel.findCouncilSlot');
+    expect(renderer).toContain('DecagramCouncilSceneViewModel.findCouncilSlot');
     expect(renderer).toContain('providerId: choice.providerId');
     expect(renderer).toContain('assignmentBadge(slot.member.key)');
     expect(renderer).toContain('api.startSquad(preview.digest)');
@@ -142,7 +146,7 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('councilSlot?.validation?.fingerprint');
     expect(
       renderer.match(
-        /CouncilSceneViewModel\.invokeProfileStart\(slot, profileActions\)/g,
+        /DecagramCouncilSceneViewModel\.invokeProfileStart\(slot, profileActions\)/g,
       ),
     ).toHaveLength(2);
     expect(renderer).not.toContain('api.startMember(');

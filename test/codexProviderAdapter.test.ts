@@ -39,8 +39,8 @@ const readyState: CodexConnectionState = {
   phase: 'ready',
   initialized: true,
   userAgent: 'codex-cli/test',
-  platformFamily: 'unix',
-  platformOs: 'macos',
+  platformFamily: 'windows',
+  platformOs: 'windows',
   account: {
     requiresOpenaiAuth: true,
     authenticated: true,

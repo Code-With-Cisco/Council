@@ -81,6 +81,7 @@ describe('Windows gate configuration', () => {
     expect(text).toContain('agent-shell-dispatch.ps1');
     expect(text).toContain('story-gate.ps1');
     expect(text).toContain('"shell":"powershell"');
+    expect(text).toContain('powershell.exe -NoProfile -NonInteractive -File');
     expect(text).not.toContain('.sh');
     expect(config['PreToolUse']?.map((group) => group.matcher)).toEqual([
       'Edit|Write',
