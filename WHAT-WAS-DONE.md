@@ -203,3 +203,37 @@ Implemented in the uncommitted working tree on 2026-08-16:
 - A true end-to-end update remains unclaimed until two signed versions are
   published and an older installed version downloads, installs, and relaunches
   into the newer version.
+
+## Packaged guard self-test repair
+
+Implemented on 2026-08-16 after the installed app reported exit
+`4294770688` (`0xFFFD0000`):
+
+- Confirmed the status is Windows PowerShell's failure to open a `-File` path,
+  not a guard-policy failure. Electron could see the scripts inside
+  `app.asar`, but the external PowerShell process could not execute that
+  virtual path.
+- Added the PowerShell guards as ordinary packaged resources and made bundled
+  script discovery prefer `resources/scripts/gates` in packaged execution.
+- Made the diagnostic translate the opaque Windows status into an actionable
+  "could not open the guard self-test script" message.
+- Corrected the Windows PowerShell 5.1 canary harness so the guards' expected
+  stderr block reasons do not terminate the harness before it can verify both
+  exit-2 results.
+- Added regression coverage for packaged resource resolution and the real
+  PowerShell self-test.
+- Bumped the local bugfix build from 0.2.0 to 0.2.1 so an installed 0.2.0 can
+  recognize it as an update. Nothing was published.
+
+### Guard repair verification
+
+- TypeScript typecheck and focused gate tests passed.
+- Serialized full suite: 49 files, 437 tests, 0 failures. The ordinary parallel
+  suite exposed an existing five-second Git/worktree timing flake, which passed
+  in isolation and in the serialized full run.
+- Rebuilt the x64 unpacked application and invoked its exact packaged
+  `resources/scripts/gates/guard-self-test.ps1`; it reported
+  `Guard self-test passed.` and exited 0.
+- Built local installer `release/Decagram Council Setup 0.2.1.exe`; SHA-256
+  `CB09823077E7AB83B11B63D98C3CAEEB9FD5FA53AD1E13A049ED2BAD60D3A254`.
+- No commit or push was performed for this repair.

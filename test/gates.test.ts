@@ -3,17 +3,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   GATE_MARKER,
   POWERSHELL_GUARD_FILES,
+  bundledGatesDir,
   generateGateConfig,
   planGateInstall,
 } from '../src/integration/gates/install.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GATE = path.join(REPO_ROOT, 'scripts', 'gates', 'story-gate.ps1');
+const GUARD_SELF_TEST = path.join(REPO_ROOT, 'scripts', 'gates', 'guard-self-test.ps1');
 const cleanups: (() => Promise<void>)[] = [];
 
 function locatePowerShell(): string | undefined {
@@ -110,11 +112,52 @@ describe('Windows gate configuration', () => {
   it('uses the Decagram Council marker', () => {
     expect(GATE_MARKER).toBe('decagram-council-story-gate');
   });
+
+  it('prefers executable guard resources outside app.asar in a packaged app', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'decagram-packaged-gates-'));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const externalGates = path.join(root, 'resources', 'scripts', 'gates');
+    await mkdir(externalGates, { recursive: true });
+    const packagedModule = path.join(
+      root,
+      'resources',
+      'app.asar',
+      'dist',
+      'src',
+      'integration',
+      'gates',
+      'install.js',
+    );
+
+    expect(bundledGatesDir(pathToFileURL(packagedModule).href)).toBe(externalGates);
+  });
 });
 
 describe.skipIf(POWERSHELL === undefined)(
   'story-gate.ps1 (skipped when PowerShell is unavailable)',
   () => {
+    it(
+      'recognizes both intentional canary blocks as a passing guard self-test',
+      () => {
+        const run = spawnSync(
+          POWERSHELL!,
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-File',
+            GUARD_SELF_TEST,
+            '-ProjectDir',
+            REPO_ROOT,
+          ],
+          { encoding: 'utf8' },
+        );
+
+        expect(run.status, run.stderr).toBe(0);
+        expect(run.stdout).toContain('Guard self-test passed.');
+      },
+      15_000,
+    );
+
     it('allows a traced story whose PowerShell acceptance passes', async () => {
       const root = await project({
         'MER-101.md': story({

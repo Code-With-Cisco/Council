@@ -1,7 +1,7 @@
 {
   "name": "decagram-council",
   "productName": "Decagram Council",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Windows mission control for Claude Code and Codex agents",
   "main": "dist/src/ui/main.js",
@@ -56,6 +56,15 @@
       ".claude/agents/*.md",
       ".claude/settings.json",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts/gates",
+        "to": "scripts/gates",
+        "filter": [
+          "*.ps1"
+        ]
+      }
     ],
     "directories": {
       "output": "release"

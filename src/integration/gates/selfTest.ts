@@ -25,6 +25,15 @@ interface ProcessResult {
   readonly spawnError: NodeJS.ErrnoException | undefined;
 }
 
+const WINDOWS_POWERSHELL_FILE_NOT_FOUND = 0xfffd0000;
+
+function failedExitMessage(code: number | null, script: string): string {
+  if (code === WINDOWS_POWERSHELL_FILE_NOT_FOUND || code === -196_608) {
+    return `PowerShell could not open the guard self-test script: ${script}`;
+  }
+  return `Guard self-test exited ${code ?? 'without a code'}.`;
+}
+
 function run(
   executable: string,
   argv: readonly string[],
@@ -103,7 +112,7 @@ export async function runGuardSelfTest(
     return {
       status: 'failed',
       interpreter,
-      message: `Guard self-test exited ${result.code ?? 'without a code'}.`,
+      message: failedExitMessage(result.code, script),
       output,
     };
   }

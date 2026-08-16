@@ -41,10 +41,19 @@ export interface GenerateGateOptions {
   readonly scriptLocation?: GateScriptLocation | undefined;
 }
 
-/** Locates this repo's checked-in PowerShell scripts. */
-export function bundledGatesDir(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
+/** Locates the PowerShell scripts in source, compiled, or packaged execution. */
+export function bundledGatesDir(moduleUrl = import.meta.url): string {
+  const here = path.dirname(fileURLToPath(moduleUrl));
+  const isPackagedArchive = here
+    .toLowerCase()
+    .includes(`${path.sep}app.asar${path.sep}`.toLowerCase());
   const candidates = [
+    ...(isPackagedArchive
+      ? [
+          // External processes cannot execute paths within app.asar.
+          path.resolve(here, '..', '..', '..', '..', '..', 'scripts', 'gates'),
+        ]
+      : []),
     // tsx/source execution: <root>/src/integration/gates
     path.resolve(here, '..', '..', '..', 'scripts', 'gates'),
     // compiled or packaged: <root>/dist/src/integration/gates

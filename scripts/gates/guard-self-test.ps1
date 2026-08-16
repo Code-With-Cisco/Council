@@ -46,13 +46,19 @@ $shellPayload = @{
 } | ConvertTo-Json -Depth 5 -Compress
 
 $previousProjectDir = $env:CLAUDE_PROJECT_DIR
+$previousErrorActionPreference = $ErrorActionPreference
 $env:CLAUDE_PROJECT_DIR = $ProjectDir
 try {
+    # Windows PowerShell 5.1 promotes a native child's intentional stderr into
+    # NativeCommandError. These canaries must inspect exit 2 without allowing
+    # that expected block message to terminate the self-test first.
+    $ErrorActionPreference = 'Continue'
     $writePayload | & $hostExecutable -NoProfile -NonInteractive -File $writeDispatcher 2>$null
     $writeCode = $LASTEXITCODE
     $shellPayload | & $hostExecutable -NoProfile -NonInteractive -File $shellDispatcher 2>$null
     $shellCode = $LASTEXITCODE
 } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
     $env:CLAUDE_PROJECT_DIR = $previousProjectDir
 }
 

@@ -21,9 +21,11 @@ Implemented in the uncommitted working tree on 2026-08-16:
 - packaged Codex discovery in current VS Code and VS Code Insiders extension
   layouts for x64 and ARM64; and
 - manual in-app Windows update check, download progress, confirmed install, and
-  orderly relaunch, plus a tag-only draft GitHub Release workflow.
+  orderly relaunch, plus a tag-only draft GitHub Release workflow; and
+- packaged guard scripts outside `app.asar`, packaged-resource resolution, and
+  Windows PowerShell 5.1-compatible guard self-test canary handling.
 
-Automated verification is green (`npx tsc --noEmit`, 49 test files / 435 tests,
+Automated verification is green (`npx tsc --noEmit`, 49 test files / 437 tests,
 build, x64 NSIS packaging, and a clean production dependency audit). The
 following work remains and must not be
 treated as verified or complete:
@@ -31,6 +33,9 @@ treated as verified or complete:
 - run the installed-app matrix in Phase 4, especially live output, direct chat,
   the current completed Council transcript, a minimal Claude Mission, Codex
   authentication/App Server initialization, and three saved repositories;
+- confirm Diagnostics reports **Guard self-test: Passed** in a newly installed
+  build. The rebuilt unpacked x64 package and its exact external script pass,
+  but an installer/UI interaction is not claimed yet;
 - add Agent Pack update/uninstall with backup restoration. The current installer
   is idempotent and conflict-safe but intentionally has no destructive uninstall;
 - add the user-selected Codex executable override/picker and attempted-location
@@ -41,9 +46,9 @@ treated as verified or complete:
 - configure consistent Authenticode signing, publish two incrementing test
   versions, and perform an installed-app update/download/install/relaunch test;
   and
-- manually install the updater-enabled 0.2.0 build over the existing 0.1.0
-  installation once; 0.1.0 cannot self-bootstrap functionality it does not
-  contain; and
+- install the local 0.2.1 bugfix over the currently installed build and confirm
+  the Diagnostics card passes, or publish a reviewed `v0.2.1` release so an
+  installed 0.2.0 can exercise the in-app update path; and
 - keep concurrent windows blocked until every IPC request carries and validates
   an exact workspace ID and runtime-registry isolation tests pass.
 
