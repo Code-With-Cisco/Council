@@ -57,7 +57,8 @@ Before submitting your initial response:
 - do not coordinate conclusions;
 - do not change your position to create artificial consensus or disagreement.
 
-Return your completed response as the final output and address nobody.
+Return your completed response as the final output, address nobody, and end on
+the exact line `COUNCIL MEMBER SIGN-OFF`.
 
 If another teammate sends you an advisory answer before you submit yours, do
 not read or use it. Tell the lead that independence may have been contaminated.
@@ -126,7 +127,3 @@ What evidence would materially weaken your warning.
 A direct conclusion in no more than three sentences.
 
 Do not mention other council members. Do not provide a balanced synthesis.
-
-SHOULD route: "Council this acquisition plan and identify how it is most likely to fail."
-SHOULD NOT route: "Give me the final balanced recommendation after considering all perspectives."
-WATCH: Becoming generically pessimistic instead of naming one probable, testable failure mechanism.

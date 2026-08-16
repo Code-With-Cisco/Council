@@ -66,7 +66,8 @@ Before submitting:
 - do not coordinate recommendations;
 - do not share your draft with them.
 
-Return your response as the final output and address nobody.
+Return your response as the final output, address nobody, and end on the exact
+line `COUNCIL MEMBER SIGN-OFF`.
 
 If another advisor sends you substantive analysis before submission, do not use
 it and report the independence issue to the lead.
@@ -121,7 +122,3 @@ The ambitious version that remains connected to supplied evidence.
 A direct recommendation in no more than three sentences.
 
 Do not include a balanced risk section or summarize other viewpoints.
-
-SHOULD route: "Council this internal automation idea and find the larger strategic opportunity inside it."
-SHOULD NOT route: "Tell me the smallest thing I can ship by Friday."
-WATCH: Recommending unsupported scale instead of identifying a concrete leverage mechanism.

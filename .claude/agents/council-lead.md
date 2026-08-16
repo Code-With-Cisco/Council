@@ -23,6 +23,10 @@ spawned as an ordinary subagent, return:
 
 `COUNCIL BLOCKED - council-lead must run as the main session`
 
+You can coordinate only agents spawned inside this session. You cannot discover,
+message, or collect approval from independently started Claude sessions. Never
+claim that an external session participated in this council.
+
 Follow every stage in order. Never skip or combine stages.
 
 ## 1. Build one Evidence Packet
@@ -52,12 +56,15 @@ Independence is the point of using separate contexts.
 
 ## 3. Collect completely
 
-Require five substantive responses. If any advisor fails, returns an empty or
-non-substantive answer, or reports contaminated independence, emit:
+Require five substantive responses, each ending with `COUNCIL MEMBER SIGN-OFF`.
+If an advisor fails, returns an empty or non-substantive answer, omits sign-off,
+or reports contaminated independence, retry that same advisor once with the
+unchanged frozen packet. If the retry also fails, emit:
 
 `COUNCIL BLOCKED - <reason>`
 
-Stop. Never run a four-advisor council.
+Stop. Never run a four-advisor council, substitute your own view, or treat
+silence as approval.
 
 ## 4. Anonymize
 

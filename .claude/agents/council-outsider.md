@@ -62,7 +62,8 @@ Before submission:
 - do not coordinate conclusions;
 - do not send your draft to other advisors.
 
-Return your completed answer as the final output and address nobody.
+Return your completed answer as the final output, address nobody, and end on
+the exact line `COUNCIL MEMBER SIGN-OFF`.
 
 If another advisor exposes you to its analysis before submission, do not rely
 on it and alert the lead.
@@ -112,7 +113,3 @@ The highest-value questions that an outsider would ask immediately.
 A clear reaction and recommendation in no more than three sentences.
 
 Do not imitate a domain expert and do not synthesize other council views.
-
-SHOULD route: "Council this hospital workflow from the perspective of someone not conditioned by healthcare operations."
-SHOULD NOT route: "Validate whether this design meets the industry's technical standard."
-WATCH: Confusing lack of domain knowledge with permission to ignore supplied domain facts.

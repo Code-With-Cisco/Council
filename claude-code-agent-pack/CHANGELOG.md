@@ -1,5 +1,16 @@
 # Change Log
 
+## 2026-08-16 — Windows guard hardening
+
+- Made every hook command invoke `powershell.exe -NoProfile -NonInteractive
+  -File` explicitly and documented the allow/block exit-code contract.
+- Made an unexpected guarded child exit fail closed as exit 2.
+- Resolved junction targets during containment checks.
+- Blocked inline interpreter and nested-shell escapes in guarded PowerShell.
+- Enforced Test Engineer and PRD Lead story-field ownership from Edit/Write
+  payloads; the older prompt-only limitation below is historical.
+- Added regression coverage for each bypass.
+
 ## 2026-07-26 — Windows-only enforcement conversion
 
 - Replaced the Bash write dispatcher and role guards with PowerShell implementations.

@@ -11,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"${CLAUDE_PROJECT_DIR}/scripts/gates/agent-write-dispatch.ps1\"",
+            "command": "powershell.exe -NoProfile -NonInteractive -File \"${CLAUDE_PROJECT_DIR}/scripts/gates/agent-write-dispatch.ps1\"",
             "shell": "powershell",
             "timeout": 30,
             "statusMessage": "decagram-council-write-guard"
@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1\"",
+            "command": "powershell.exe -NoProfile -NonInteractive -File \"${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1\"",
             "shell": "powershell",
             "timeout": 30,
             "statusMessage": "decagram-council-shell-guard"
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"${CLAUDE_PROJECT_DIR}/scripts/gates/story-gate.ps1\" 'TaskCompleted'",
+            "command": "powershell.exe -NoProfile -NonInteractive -File \"${CLAUDE_PROJECT_DIR}/scripts/gates/story-gate.ps1\" 'TaskCompleted'",
             "shell": "powershell",
             "timeout": 600,
             "statusMessage": "decagram-council-story-gate"
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "& \"${CLAUDE_PROJECT_DIR}/scripts/gates/story-gate.ps1\" 'TeammateIdle'",
+            "command": "powershell.exe -NoProfile -NonInteractive -File \"${CLAUDE_PROJECT_DIR}/scripts/gates/story-gate.ps1\" 'TeammateIdle'",
             "shell": "powershell",
             "timeout": 600,
             "statusMessage": "decagram-council-story-gate"

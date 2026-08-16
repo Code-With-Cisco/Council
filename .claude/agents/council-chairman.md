@@ -10,7 +10,6 @@ description: >-
   pass, answering an incomplete council packet, or ordinary one-agent advice.
 tools: Read, Grep, Glob
 model: opus
-permissionMode: plan
 maxTurns: 15
 effort: high
 ---
@@ -138,7 +137,3 @@ Do not add appendices, methodology notes, disclaimers, or offers for more work.
 <one observable condition that would materially change the recommendation>
 
 The complete output, including headings, must remain within 200 words.
-
-SHOULD route: "Here are anonymized Responses A-E and the completed peer review; issue the council's final decision."
-SHOULD NOT route: "Generate five independent opinions about whether we should launch."
-WATCH: Producing a vague compromise that avoids choosing among conflicting recommendations.

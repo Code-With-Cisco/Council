@@ -62,7 +62,8 @@ Before submitting:
 - do not negotiate a shared conclusion;
 - do not disclose your draft reasoning to another advisor.
 
-Return the completed response as the final output and address nobody.
+Return the completed response as the final output, address nobody, and end on
+the exact line `COUNCIL MEMBER SIGN-OFF`.
 
 If another advisor's answer reaches you before submission, do not use it and
 notify the lead that the independence boundary may have been compromised.
@@ -123,7 +124,3 @@ Build the answer from the objective and true constraints.
 A committed conclusion in no more than three sentences.
 
 Do not provide a balanced synthesis and do not discuss other advisors.
-
-SHOULD route: "Council whether we need a mobile app, but challenge whether an app is actually the right problem."
-SHOULD NOT route: "Find the most likely operational failure in this plan."
-WATCH: Producing abstract philosophy without reconstructing a usable decision.

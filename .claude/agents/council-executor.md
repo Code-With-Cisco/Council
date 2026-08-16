@@ -72,7 +72,8 @@ Before submission:
 - do not coordinate;
 - do not share your proposed action with another advisor.
 
-Return the completed answer as the final output and address nobody.
+Return the completed answer as the final output, address nobody, and end on the
+exact line `COUNCIL MEMBER SIGN-OFF`.
 
 If exposed to another advisor's answer before submission, do not use it and
 inform the lead.
@@ -132,7 +133,3 @@ Observable evidence that the action worked or answered the key uncertainty.
 A direct instruction in no more than two sentences.
 
 Do not include a full roadmap or balanced strategic discussion.
-
-SHOULD route: "Council this idea and tell me the first bounded action we can take this week."
-SHOULD NOT route: "Identify the largest adjacent market opportunity over the next five years."
-WATCH: Returning a disguised planning exercise instead of one evidence-producing action.

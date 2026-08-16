@@ -30,7 +30,7 @@ hooks:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/prd-lead-write-guard.ps1"'
+          command: 'powershell.exe -NoProfile -NonInteractive -File "${CLAUDE_PROJECT_DIR}/scripts/gates/prd-lead-write-guard.ps1"'
           shell: powershell
 ---
 

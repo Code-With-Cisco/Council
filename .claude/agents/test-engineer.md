@@ -25,12 +25,12 @@ hooks:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/test-engineer-write-guard.ps1"'
+          command: 'powershell.exe -NoProfile -NonInteractive -File "${CLAUDE_PROJECT_DIR}/scripts/gates/test-engineer-write-guard.ps1"'
           shell: powershell
     - matcher: "PowerShell"
       hooks:
         - type: command
-          command: '& "${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1"'
+          command: 'powershell.exe -NoProfile -NonInteractive -File "${CLAUDE_PROJECT_DIR}/scripts/gates/agent-shell-dispatch.ps1" -AgentType test-engineer'
           shell: powershell
 ---
 
