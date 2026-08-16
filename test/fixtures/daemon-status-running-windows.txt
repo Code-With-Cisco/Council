@@ -1,0 +1,18 @@
+pid:     5976
+version: 2.1.233
+uptime:  8s
+origin:  transient — started on-demand by `claude --bg` (pid 34912) in C:\Users\User\AppData\Local\Temp
+config:  C:\Users\User\.claude\daemon.json
+log:     C:\Users\User\.claude\daemon.log
+
+bg sessions:
+  sock dir:     \\.\pipe\cc-daemon-*
+  control.sock: reachable
+  bg workers:   1 running (control.sock), 1 in roster.json
+  roster.json:  updated 8s ago
+  daemon.log:   1.2KB at C:\Users\User\.claude\daemon.log
+
+holding this daemon open:
+  1 bg worker running (daemon waits for them to settle)
+
+to let it idle-exit: wait for (or cancel) bg workers and close any `claude agents`

@@ -88,11 +88,17 @@ describe('PowerShell shell-guard source', () => {
 describe.skipIf(POWERSHELL === undefined)(
   'PowerShell shell guard (skipped when PowerShell is unavailable)',
   () => {
+    // Each case is a real PowerShell process. Windows start-up cost is roughly
+    // a second apiece, so a case that dispatches five commands cannot fit in
+    // Vitest's 5s default. These suites never ran on the macOS host, so the
+    // timeouts had never been exercised.
+    const GUARD_TIMEOUT_MS = 60_000;
+
     it('allows existing program invocations', async () => {
       const root = await project();
       expect((await run(root, 'builder', 'npm run typecheck')).code).toBe(0);
       expect((await run(root, 'test-engineer', 'node --version')).code).toBe(0);
-    });
+    }, GUARD_TIMEOUT_MS);
 
     it('blocks direct file mutation constructs', async () => {
       const root = await project();
@@ -105,7 +111,7 @@ describe.skipIf(POWERSHELL === undefined)(
       ]) {
         expect((await run(root, 'builder', command)).code).toBe(2);
       }
-    });
+    }, GUARD_TIMEOUT_MS);
 
     it('blocks obfuscated commands and dynamic evaluation', async () => {
       const root = await project();
@@ -116,12 +122,12 @@ describe.skipIf(POWERSHELL === undefined)(
       ]) {
         expect((await run(root, 'builder', command)).code).toBe(2);
       }
-    });
+    }, GUARD_TIMEOUT_MS);
 
     it('does not gate an unguarded agent or human session', async () => {
       const root = await project();
       expect((await run(root, 'reviewer', 'Set-Content x y')).code).toBe(0);
       expect((await run(root, undefined, 'Set-Content x y')).code).toBe(0);
-    });
+    }, GUARD_TIMEOUT_MS);
   },
 );

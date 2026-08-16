@@ -29,6 +29,10 @@ async function repositoryWithCandidate(): Promise<{
   const repositoryRoot = path.join(directory, 'repository');
   await mkdir(repositoryRoot, { recursive: true });
   await execute('git', ['init', '-b', 'main'], { cwd: repositoryRoot });
+  // Git for Windows sets core.autocrlf=true system-wide, which would rewrite
+  // LF to CRLF on checkout and make content assertions depend on the host's
+  // Git configuration rather than on what the port did.
+  await execute('git', ['config', 'core.autocrlf', 'false'], { cwd: repositoryRoot });
   await writeFile(path.join(repositoryRoot, 'result.txt'), 'base\n', 'utf8');
   await execute('git', ['add', 'result.txt'], { cwd: repositoryRoot });
   const identityArgs = [
@@ -115,6 +119,10 @@ describe('semantic Git port', () => {
     const repositoryRoot = path.join(directory, 'repo with spaces');
     await mkdir(repositoryRoot, { recursive: true });
     await execute('git', ['init', '-b', 'main'], { cwd: repositoryRoot });
+    // Git for Windows sets core.autocrlf=true system-wide, which would rewrite
+    // LF to CRLF on checkout and make content assertions depend on the host's
+    // Git configuration rather than on what the port did.
+    await execute('git', ['config', 'core.autocrlf', 'false'], { cwd: repositoryRoot });
     await writeFile(path.join(repositoryRoot, 'README.md'), 'fixture\n', 'utf8');
     await execute('git', ['add', 'README.md'], { cwd: repositoryRoot });
     await execute(

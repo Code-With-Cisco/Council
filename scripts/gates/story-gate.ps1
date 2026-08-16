@@ -50,7 +50,19 @@ function Get-Frontmatter {
         $separator = $line.IndexOf(':')
         if ($separator -lt 1) { continue }
         $key = $line.Substring(0, $separator).Trim()
-        $value = $line.Substring($separator + 1).Trim().Trim('"').Trim("'")
+        $value = $line.Substring($separator + 1).Trim()
+        # Strip only a matched pair of wrapping quotes. Trim('"') would also eat
+        # a quote that belongs to the value: an acceptance of
+        # `node -e "process.exit(0)"` became `node -e "process.exit(0)`, an
+        # unterminated string that failed for the wrong reason — or, worse,
+        # silently changed what the gate executed.
+        if ($value.Length -ge 2) {
+            $first = $value[0]
+            $last = $value[$value.Length - 1]
+            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+        }
         if (-not $result.ContainsKey($key)) { $result[$key] = $value }
     }
     return $result
@@ -147,7 +159,24 @@ foreach ($story in $stories) {
 
     Push-Location -LiteralPath $projectDir
     try {
-        $output = & $powershellHost -NoProfile -NonInteractive -Command $acceptance 2>&1
+        # Two separate hazards, both of which silently PASSED a failing story:
+        #
+        #  1. Passing the command after -Command strips its embedded double
+        #     quotes. `node -e "process.exit(3)"` reached the child as
+        #     `node -e process.exit(3)`, where PowerShell read `(3)` as a
+        #     subexpression, so node evaluated a bare `process.exit` and exited 0.
+        #  2. -Command does not propagate a native command's exit code unless the
+        #     script exits explicitly.
+        #
+        # -EncodedCommand passes the text through verbatim, and the wrapper makes
+        # the child exit with the real status, turning a terminating cmdlet error
+        # into a non-zero status too.
+        $wrapped = '$ErrorActionPreference = ''Stop''; try { & { ' +
+            $acceptance +
+            ' } } catch { Write-Error $_.Exception.Message; exit 1 }; ' +
+            'if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }; exit 0'
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrapped))
+        $output = & $powershellHost -NoProfile -NonInteractive -EncodedCommand $encoded 2>&1
         $code = $LASTEXITCODE
     } catch {
         $output = $_.Exception.Message

@@ -12,6 +12,7 @@
 import type {
   CliResult,
   DaemonStatus,
+  DaemonStopOutcome,
   RawRosterEntry,
   Session,
   StartedSession,
@@ -26,7 +27,7 @@ import {
   type LocatedCli,
   type LocateOptions,
 } from './cli/locate.js';
-import { parseDaemonStatus } from './parse/daemon.js';
+import { parseDaemonStatus, parseDaemonStop } from './parse/daemon.js';
 import { parseRoster, parseStartedSession } from './parse/roster.js';
 
 export interface StartSessionRequest {
@@ -327,11 +328,18 @@ export class ClaudeClient {
    * `any` also stops a transient (non-service) daemon, which is the only kind
    * this version produces.
    */
-  daemonStop(options: { any?: boolean; keepWorkers?: boolean } = {}): Promise<CliResult<string>> {
+  async daemonStop(
+    options: { any?: boolean; keepWorkers?: boolean } = {},
+  ): Promise<CliResult<DaemonStopOutcome>> {
     const argv = ['daemon', 'stop'];
     if (options.any !== false) argv.push('--any');
     if (options.keepWorkers !== false) argv.push('--keep-workers');
-    return this.exec(argv, { timeoutMs: 30_000 });
+    // Like `daemon status`, this describes "nothing to stop" in prose the error
+    // classifier would otherwise read as a daemon failure. Stopping an already
+    // stopped supervisor is a success.
+    const result = await this.exec(argv, { timeoutMs: 30_000, treatOutputAsSuccess: true });
+    if (!result.ok) return result;
+    return { ...result, value: parseDaemonStop(result.value) };
   }
 }
 

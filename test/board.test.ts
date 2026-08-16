@@ -129,8 +129,14 @@ describe('worktreeBoards', () => {
 });
 
 describe('claudeConfigDir', () => {
+  // The override is resolved, not taken verbatim, so a POSIX literal picks up
+  // the current drive on Windows ('/custom/claude' -> 'C:\custom\claude').
+  // Comparing against path.resolve keeps the assertion about the behaviour
+  // rather than about the host's path flavour.
+  const override = path.resolve('/custom/claude');
+
   it('honours CLAUDE_CONFIG_DIR', () => {
-    expect(claudeConfigDir({ env: { CLAUDE_CONFIG_DIR: '/custom/claude' } })).toBe('/custom/claude');
+    expect(claudeConfigDir({ env: { CLAUDE_CONFIG_DIR: '/custom/claude' } })).toBe(override);
   });
 
   it('ignores an empty override', () => {
@@ -141,12 +147,12 @@ describe('claudeConfigDir', () => {
 
   it('derives every state path from the config directory', () => {
     const paths = new ClaudePaths({ configDir: '/custom/claude' });
-    expect(paths.jobStateFile('abc12345')).toBe(path.join('/custom/claude', 'jobs', 'abc12345', 'state.json'));
-    expect(paths.pinsFile()).toBe(path.join('/custom/claude', 'jobs', 'pins.json'));
+    expect(paths.jobStateFile('abc12345')).toBe(path.join(override, 'jobs', 'abc12345', 'state.json'));
+    expect(paths.pinsFile()).toBe(path.join(override, 'jobs', 'pins.json'));
     expect(paths.teamConfigFile('session-abc12345')).toBe(
-      path.join('/custom/claude', 'teams', 'session-abc12345', 'config.json'),
+      path.join(override, 'teams', 'session-abc12345', 'config.json'),
     );
     // The app's own writable subtree — the only place it writes under <config>.
-    expect(paths.receiverFile()).toBe(path.join('/custom/claude', 'decagram-council', 'receiver.json'));
+    expect(paths.receiverFile()).toBe(path.join(override, 'decagram-council', 'receiver.json'));
   });
 });

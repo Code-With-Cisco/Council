@@ -206,6 +206,26 @@ export interface DaemonStatus {
   readonly raw: string;
 }
 
+/**
+ * Outcome of `claude daemon stop`. The command exits 0 in every observed case,
+ * including when there was nothing to stop, so the text is the only signal.
+ */
+export interface DaemonStopOutcome {
+  /** The supervisor was running and has been shut down. */
+  readonly stopped: boolean;
+  /** There was no supervisor to stop — a success, not a fault. */
+  readonly alreadyStopped: boolean;
+  /** False when the output matched nothing known; render `raw` in that case. */
+  readonly recognized: boolean;
+  /**
+   * Set when the CLI reports a pid to terminate by hand because the supervisor
+   * did not answer. On Windows a process holding its pipe cannot be displaced
+   * by another `stop`, so the remaining recovery is `taskkill /PID <pid> /F`.
+   */
+  readonly manualKillPid: number | undefined;
+  readonly raw: string;
+}
+
 /** Why a CLI invocation failed. Derived from output text, never from exit codes. */
 export type CliFailureKind =
   /** The `claude` binary could not be located on this machine. */

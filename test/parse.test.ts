@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseRoster, parseStartedSession, shortIdFor } from '../src/integration/parse/roster.js';
-import { parseDaemonStatus } from '../src/integration/parse/daemon.js';
+import { parseDaemonStatus, parseDaemonStop } from '../src/integration/parse/daemon.js';
 import {
   classifyOutput,
   detectUnknownAgentWarning,
@@ -163,6 +163,22 @@ describe('parseDaemonStatus', () => {
     expect(status.rosterPresent).toBe(false);
   });
 
+  it('reads a running daemon on Windows, including its trailing advice block', () => {
+    // Captured verbatim from a real supervisor on Windows with 2.1.233. Unlike
+    // the macOS transcript this form ends with a "holding this daemon open"
+    // section, which must not disturb the anchored field reads above it.
+    const status = parseDaemonStatus(readFixture('daemon-status-running-windows.txt'));
+    expect(status.recognized).toBe(true);
+    expect(status.running).toBe(true);
+    expect(status.pid).toBe(5976);
+    expect(status.version).toBe('2.1.233');
+    expect(status.controlSocketReachable).toBe(true);
+    // "1 running (control.sock), 1 in roster.json" — the live count wins.
+    expect(status.workerCount).toBe(1);
+    expect(status.rosterPresent).toBe(true);
+    expect(status.socketDir).toBe('\\\\.\\pipe\\cc-daemon-*');
+  });
+
   it('reads the Windows named-pipe form of a stopped daemon', () => {
     // Captured verbatim from `claude daemon status` on Windows with 2.1.233.
     // The labels are identical to the POSIX form; only the transport differs,
@@ -176,6 +192,43 @@ describe('parseDaemonStatus', () => {
     // reads must not pick it up in place of the real `roster.json:` line.
     expect(status.workerCount).toBe(0);
     expect(status.rosterPresent).toBe(false);
+  });
+
+  it('reads both observed daemon stop outcomes', () => {
+    // Both exit 0, so the text is the only signal that distinguishes them.
+    const stopped = parseDaemonStop(
+      'stopped\nnote: the next `claude agents` or `claude --bg` will start a new one',
+    );
+    expect(stopped).toMatchObject({
+      stopped: true,
+      alreadyStopped: false,
+      recognized: true,
+      manualKillPid: undefined,
+    });
+
+    const none = parseDaemonStop('no daemon running');
+    expect(none).toMatchObject({
+      stopped: false,
+      alreadyStopped: true,
+      recognized: true,
+    });
+  });
+
+  it('surfaces a pid to taskkill when the supervisor will not answer', () => {
+    // Defensive: this exact wording has not been captured from a real wedged
+    // supervisor, so the assertion covers the handling, not the phrasing.
+    const outcome = parseDaemonStop(
+      'daemon did not respond; terminate it manually with taskkill /PID 4321 /F',
+    );
+    expect(outcome.manualKillPid).toBe(4321);
+    expect(outcome.recognized).toBe(true);
+  });
+
+  it('keeps unrecognised daemon stop output readable', () => {
+    const outcome = parseDaemonStop('something entirely new');
+    expect(outcome.recognized).toBe(false);
+    expect(outcome.manualKillPid).toBeUndefined();
+    expect(outcome.raw).toBe('something entirely new');
   });
 
   it('retains raw output for an unrecognised format', () => {

@@ -50,7 +50,46 @@
  * when the last client disconnects. The UI must not present it as broken.
  */
 
-import type { DaemonStatus } from '../types.js';
+import type { DaemonStatus, DaemonStopOutcome } from '../types.js';
+
+/**
+ * Parses `claude daemon stop --any --keep-workers`.
+ *
+ * Two shapes observed on Windows with 2.1.233, both exiting 0:
+ *
+ *   stopped
+ *   note: the next `claude agents` or `claude --bg` will start a new one
+ *
+ *   no daemon running
+ *
+ * The third case — a supervisor that does not answer, where the CLI reports a
+ * pid to terminate manually — has NOT been observed here, because wedging a
+ * supervisor on demand is not something this codebase can arrange. It is
+ * handled defensively rather than precisely: any pid mentioned alongside
+ * taskkill/kill wording is surfaced so the UI can offer it, and `raw` is always
+ * retained so an unrecognised message is still readable. Do not tighten this
+ * pattern against a guess; tighten it the first time a real one is captured.
+ */
+export function parseDaemonStop(raw: string): DaemonStopOutcome {
+  const alreadyStopped = /^\s*no daemon running\s*$/im.test(raw);
+  const stopped = /^\s*stopped\b/im.test(raw);
+
+  let manualKillPid: number | undefined;
+  if (/taskkill|kill the process|terminate it manually/i.test(raw)) {
+    const match = /\b(?:pid|\/pid)\s*:?\s*(\d{1,10})\b/i.exec(raw);
+    const parsed = match?.[1] === undefined ? Number.NaN : Number.parseInt(match[1], 10);
+    if (!Number.isNaN(parsed)) manualKillPid = parsed;
+  }
+
+  return {
+    stopped,
+    alreadyStopped,
+    // Neither recognised sentence and no pid to act on: the caller shows `raw`.
+    recognized: stopped || alreadyStopped || manualKillPid !== undefined,
+    manualKillPid,
+    raw,
+  };
+}
 
 /** Reads `key: value` from the flat header block. */
 function field(raw: string, key: string): string | undefined {

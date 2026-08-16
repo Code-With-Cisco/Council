@@ -430,16 +430,93 @@ so discovery does not depend on that PATH entry being fixed.
 
 ### Blocking issues still open
 
-- **#4** no Windows `taskkill` recovery path.
-- **#5** `daemonStop()` still has no caller.
 - **#6** reply remains gated on `blocked` + `input needed`. Unchanged
   deliberately: widening it is a product decision, not a version alignment.
-- **#7** roster, job, team and task file shapes remain unverified; no background
-  session has been dispatched on this host.
-- **#8** `README 2.md` is still committed.
 
-Open questions 1 to 7 in section 5 are unchanged. Question 8 remains open: no
-supervisor has run, so its version is still unobservable.
+---
+
+## 7. Closure pass
+
+Everything below was done after section 6, on 2.1.233.
+
+### Live verification against a real supervisor
+
+A `--bg --exec` shell job was dispatched, observed, stopped and removed. It spends
+no model quota and exercises the same dispatch, roster, logs, stop and rm paths a
+real session uses. Results:
+
+- Dispatch printed `backgrounded · 6f0168c1 · <name>` and parsed correctly.
+- `<config>/jobs/<id>/state.json` appeared with `state` and `detail`, and
+  `daemonShort` matched the roster `id`.
+- The short id is the first 8 characters of the session UUID, as assumed.
+- A bogus id was classified `unknown-session` despite exit code 0.
+- The round-trip left no sessions behind.
+
+A second job was held open to capture the running supervisor:
+
+- **Supervisor version 2.1.233 matches the CLI version 2.1.233.**
+- A background session in state `working` reports **no `pid`**, confirming on
+  Windows the reasoning `deriveCold` was built on.
+- The Windows running-status output carries a trailing "holding this daemon
+  open" block absent from the macOS transcript.
+
+Both Windows daemon-status shapes are now fixtures
+(`daemon-status-running-windows.txt`, `daemon-status-stopped-windows.txt`) and
+are covered by parser tests.
+
+### Blocking issues closed here
+
+- **#4 / #5** `daemonStop()` now parses its outcome into `DaemonStopOutcome` and
+  has a caller: `npm run harness daemon-stop`. Two outcomes were observed
+  directly and are tested — `stopped` and `no daemon running`, both exit 0. The
+  wedged-supervisor case still could not be produced on demand, so its pid
+  extraction is defensive and its exact wording remains uncaptured.
+- **#7** closed by the live round-trip above.
+- **#8** `README 2.md` deleted. It was a stale duplicate committed once in
+  `e95104a`, still describing a macOS/Windows product with a bash forwarder and
+  an unbuilt UI.
+
+### Open questions closed
+
+- **1** job `state.json` shape — observed.
+- **4** running-daemon status shape on Windows — captured as a fixture.
+- **5** `claude logs` error classification — confirmed via the bogus-id check.
+- **6** dispatch output layout — confirmed.
+- **8** supervisor vs CLI version — they match at 2.1.233.
+
+Questions 2 (team/task file shapes), 3 (wedged-supervisor stop text) and 7
+(cross-session messaging platform support) remain open.
+
+### Test suite
+
+`npx tsc --noEmit` passes. `npm test` is **43 files, 407 tests, 0 failures** —
+the first fully green suite on Windows. The eight pre-existing failures were
+resolved as follows, and two were real product defects rather than test noise:
+
+1. `test/board.test.ts` (2) — expectations compared against POSIX literals where
+   `claudeConfigDir` correctly resolves to a drive-qualified path. Test-side.
+2. `test/gitClient.test.ts` (2) — **product defect.** Git reports worktree paths
+   with forward slashes (`C:/Users/...`) while Node produces `C:\Users\...`, so
+   every path comparison failed and worktree reconciliation could not match a
+   checkout it had just created. Normalised in `parseWorktreePorcelain`.
+3. `test/gitClient.test.ts` (1) and `test/missionGitAdapter.test.ts` (1) — Git for
+   Windows sets `core.autocrlf=true` system-wide, so fixture content round-tripped
+   as CRLF. Fixture repos now pin `core.autocrlf=false`.
+4. `test/shell-guards.test.ts` (1) — five real PowerShell processes cannot finish
+   inside Vitest's 5s default. Timeout raised.
+5. `test/gates.test.ts` (1) — **product defect, two compounding bugs.** The
+   frontmatter reader used `Trim('"')`, which strips a quote belonging to the
+   value: an acceptance of `node -e "process.exit(0)"` became
+   `node -e "process.exit(0)`. Separately, the acceptance command was passed after
+   `-Command`, which strips embedded quotes and does not propagate a native exit
+   code, so `node -e "process.exit(3)"` reached the child as
+   `node -e process.exit(3)`, was read as a subexpression, and exited 0. **The
+   story gate could not fail a story.** Both fixed; the gate now runs acceptance
+   through `-EncodedCommand` with an explicit exit.
+
+Item 5 is the reason the ledger rows for the PowerShell guards mattered: those
+suites had never executed on any host, and running them found a gate that always
+passed.
 
 ### Test suite state on Windows
 

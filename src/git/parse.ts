@@ -1,4 +1,19 @@
+import * as path from 'node:path';
 import type { GitWorktreeEntry } from './contracts.js';
+
+/**
+ * Git reports worktree paths with forward slashes on every platform:
+ * `C:/Users/me/repo`, never `C:\Users\me\repo`. Node produces the native form
+ * from `process.cwd()`, `path.join` and friends, so an unnormalised comparison
+ * of the two never matches on Windows — worktree reconciliation would conclude
+ * that a checkout it had just created did not exist.
+ *
+ * Normalising here keeps that conversion in one place: every consumer of a
+ * worktree entry compares against Node-shaped paths.
+ */
+function toNativePath(value: string): string {
+  return value === '' ? value : path.normalize(value);
+}
 
 export function parseWorktreePorcelain(text: string): readonly GitWorktreeEntry[] {
   const records: GitWorktreeEntry[] = [];
@@ -18,7 +33,7 @@ export function parseWorktreePorcelain(text: string): readonly GitWorktreeEntry[
       throw new Error('Git worktree record has no path.');
     }
     records.push({
-      path: current.path,
+      path: toNativePath(current.path),
       head: current.head,
       branchRef: current.branchRef,
       detached: current.detached,

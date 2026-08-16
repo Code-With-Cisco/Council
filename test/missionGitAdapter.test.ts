@@ -43,6 +43,10 @@ async function fixture() {
   await mkdir(selectedRepositoryRoot, { recursive: true });
   const repositoryRoot = await realpath(selectedRepositoryRoot);
   await execute('git', ['init', '-b', 'main'], { cwd: repositoryRoot });
+  // Git for Windows sets core.autocrlf=true system-wide, which would rewrite
+  // LF to CRLF on checkout and make content assertions depend on the host's
+  // Git configuration rather than on what the adapter did.
+  await execute('git', ['config', 'core.autocrlf', 'false'], { cwd: repositoryRoot });
   await writeFile(path.join(repositoryRoot, 'result.txt'), 'base\n', 'utf8');
   await execute('git', ['add', 'result.txt'], { cwd: repositoryRoot });
   await execute(

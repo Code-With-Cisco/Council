@@ -7,6 +7,7 @@
  *
  * Commands:
  *   doctor              locate the CLI, read its version, read daemon status
+ *   daemon-stop         supervisor recovery, keeping detached sessions alive
  *   roster              read and print the unified roster
  *   agents [dir]        list subagent definitions visible from a directory
  *   roundtrip           start → poll → logs → stop → rm, using `--bg --exec`
@@ -334,6 +335,33 @@ async function watchState(): Promise<void> {
   await new Promise(() => undefined);
 }
 
+/**
+ * Supervisor recovery. Detached sessions are kept, so this is safe to run
+ * against a wedged daemon without losing in-flight work.
+ */
+async function daemonStop(): Promise<void> {
+  const client = await connect();
+  const outcome = expectOk(
+    await client.daemonStop({ any: true, keepWorkers: true }),
+    'daemon stop --any --keep-workers',
+  );
+
+  if (outcome.stopped) log('✓ supervisor stopped; detached sessions were left running');
+  else if (outcome.alreadyStopped) log('✓ no supervisor was running — nothing to stop');
+
+  if (outcome.manualKillPid !== undefined) {
+    // Windows cannot displace a process still holding the control pipe, so the
+    // only remaining step is an explicit kill the operator has to run.
+    log(`⚠ the supervisor did not respond. Terminate it with:`);
+    log(`    taskkill /PID ${outcome.manualKillPid} /F`);
+  }
+
+  if (!outcome.recognized) {
+    log('⚠ unrecognised output — reproduced verbatim below:');
+    log(outcome.raw.trim());
+  }
+}
+
 const commands: Record<string, () => Promise<void>> = {
   doctor,
   roster,
@@ -342,6 +370,7 @@ const commands: Record<string, () => Promise<void>> = {
   hooks,
   board,
   watch: watchState,
+  'daemon-stop': daemonStop,
 };
 
 const handler = commands[command];

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import * as nodePath from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -97,9 +98,12 @@ describe('bounded Git process boundary', () => {
       `worktree ${pathWithNewline}\0HEAD ${'a'.repeat(40)}\0branch refs/heads/council/ws/lease\0\0`,
     );
 
+    // The parser converts Git's forward-slash paths to the native separator, so
+    // the expectation is normalised too. What this test is really about is the
+    // embedded newline surviving: NUL framing must not split the record.
     expect(parsed).toEqual([
       {
-        path: pathWithNewline,
+        path: nodePath.normalize(pathWithNewline),
         head: 'a'.repeat(40),
         branchRef: 'refs/heads/council/ws/lease',
         detached: false,
@@ -108,5 +112,6 @@ describe('bounded Git process boundary', () => {
         prunableReason: undefined,
       },
     ]);
+    expect(parsed[0]?.path).toContain('\n');
   });
 });
