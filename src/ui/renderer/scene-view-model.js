@@ -59,8 +59,10 @@
         workspaceReady &&
         capabilities.plainTextReply === true &&
         hasExactSession &&
-        slot.session.state === 'blocked' &&
-        slot.session.waitingFor === 'input needed',
+        ((slot.session.state === 'blocked' &&
+          slot.session.waitingFor === 'input needed') ||
+          slot.session.state === 'done' ||
+          slot.session.state === 'failed'),
       clear:
         workspaceReady &&
         options.bindingHealthy !== false &&
@@ -118,7 +120,7 @@
         label: slot.member.label,
         mode: slotMode(slot),
         missionBadge:
-          window.CouncilMissionViewModel?.assignmentBadge(
+          window.DecagramCouncilMissionViewModel?.assignmentBadge(
             options.missionState,
             slot.member.key,
           ),
@@ -126,7 +128,7 @@
     };
   }
 
-  window.CouncilSceneViewModel = {
+  window.DecagramCouncilSceneViewModel = {
     slotMode,
     actionState,
     createProfileActionRouter,

@@ -61,7 +61,7 @@ function powershellCommand(
   const directory = location === 'source' ? 'scripts/gates' : '.claude/hooks';
   const script = `\${CLAUDE_PROJECT_DIR}/${directory}/${filename}`;
   const quotedArgs = args.map((arg) => `'${arg.replaceAll("'", "''")}'`).join(' ');
-  return `& "${script}"${quotedArgs === '' ? '' : ` ${quotedArgs}`}`;
+  return `powershell.exe -NoProfile -NonInteractive -File "${script}"${quotedArgs === '' ? '' : ` ${quotedArgs}`}`;
 }
 
 function handler(

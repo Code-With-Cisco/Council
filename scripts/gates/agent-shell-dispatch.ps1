@@ -2,13 +2,19 @@
 <#
 Construct-level PowerShell guard for Builder and Test Engineer.
 
+Exit 0 allows the tool call and exit 2 blocks it. Any parser or policy failure
+after a guarded agent is identified exits 2; unexpected codes never pass.
+
 This does not attempt containment or infer every path a program may write.
 It blocks use of PowerShell itself as an editor and rejects constructs that
 defeat reliable token inspection. Edit and Write remain the intentional,
 path-gated file-changing tools.
 #>
 
-param([string]$PayloadText)
+param(
+    [string]$PayloadText,
+    [ValidateSet('', 'builder', 'test-engineer')][string]$AgentType = ''
+)
 
 . (Join-Path $PSScriptRoot '_guard-lib.ps1')
 
@@ -22,7 +28,8 @@ try {
     exit 0
 }
 
-$agentType = [string](Get-GuardProperty -InputObject $payload -Name 'agent_type')
+$payloadAgentType = [string](Get-GuardProperty -InputObject $payload -Name 'agent_type')
+$agentType = if ([string]::IsNullOrWhiteSpace($AgentType)) { $payloadAgentType } else { $AgentType }
 if ('builder', 'test-engineer' -notcontains $agentType) { exit 0 }
 
 $projectDir = Get-GuardProjectDir $payload
@@ -46,6 +53,7 @@ $blocked = @(
     @{ Name = 'encoded command'; Pattern = '(?i)(?:-EncodedCommand|-enc\b|FromBase64String)' },
     @{ Name = 'dynamic script block'; Pattern = '(?i)\[ScriptBlock\]::Create' },
     @{ Name = 'nested process'; Pattern = '(?i)\b(?:Start-Process|Invoke-Command)\b' },
+    @{ Name = 'inline interpreter'; Pattern = '(?i)(?:^|[|;&]\s*|\s)(?:node(?:\.exe)?\s+(?:-e|--eval)|python(?:\.exe)?\s+-c|py(?:\.exe)?\s+-c|cmd(?:\.exe)?\s+/(?:c|k)|powershell(?:\.exe)?\s+-(?:command|c)\b)' },
     @{ Name = 'here-string'; Pattern = '(?s)@["''].*?["'']@' },
     @{ Name = 'variable call operator'; Pattern = '(?i)&\s*\$' }
 )

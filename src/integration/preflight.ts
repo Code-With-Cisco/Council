@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process';
+import * as path from 'node:path';
 import { loadPty } from './pty/attach.js';
 import { locateClaude, type LocateOptions, type LocatedCli } from './cli/locate.js';
 import { generateGateConfig } from './gates/install.js';
 import type { HooksConfig } from './hooks/generate.js';
+import { parseDaemonStatus } from './parse/daemon.js';
+import type { DaemonStatus } from './types.js';
 import {
   runGuardSelfTest,
   type GuardSelfTestOptions,
@@ -10,11 +13,18 @@ import {
 } from './gates/selfTest.js';
 
 export interface ExecutableStatus {
-  readonly name: 'PowerShell' | 'git' | 'node';
+  readonly name: 'PowerShell' | 'Git Bash' | 'git' | 'node';
   readonly available: boolean;
   readonly executable: string | undefined;
   readonly version: string | undefined;
   readonly discoveredVia: 'candidate-probe' | 'process' | 'not-found';
+}
+
+export interface SupervisorPreflight {
+  readonly status: DaemonStatus | undefined;
+  readonly reachable: boolean;
+  readonly versionMismatch: boolean;
+  readonly diagnostic: string | undefined;
 }
 
 export interface LaunchPreflight {
@@ -23,9 +33,11 @@ export interface LaunchPreflight {
   readonly supportedPlatform: boolean;
   readonly claude: LocatedCli | null;
   readonly powershell: ExecutableStatus;
+  readonly bash: ExecutableStatus;
   readonly git: ExecutableStatus;
   readonly node: ExecutableStatus;
   readonly guardSelfTest: GuardSelfTestResult;
+  readonly supervisor: SupervisorPreflight;
   readonly hookConfig: HooksConfig;
   readonly ptyAvailable: boolean;
 }
@@ -102,7 +114,7 @@ export async function runLaunchPreflight(
   options: LaunchPreflightOptions = {},
 ): Promise<LaunchPreflight> {
   const env = { ...process.env, ...options.env };
-  const [claude, powershell, git, guardSelfTest, pty] = await Promise.all([
+  const [claude, powershell, bash, git, guardSelfTest, pty] = await Promise.all([
     locateClaude({ ...options.locate, env }),
     probeCandidates(
       'PowerShell',
@@ -110,10 +122,52 @@ export async function runLaunchPreflight(
       ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'],
       env,
     ),
+    probeCandidates(
+      'Git Bash',
+      [
+        ...(env['ProgramFiles']
+          ? [path.join(env['ProgramFiles'], 'Git', 'bin', 'bash.exe')]
+          : []),
+        ...(env['LOCALAPPDATA']
+          ? [path.join(env['LOCALAPPDATA'], 'Programs', 'Git', 'bin', 'bash.exe')]
+          : []),
+        'bash.exe',
+        'bash',
+      ],
+      ['--version'],
+      env,
+    ),
     probeCandidates('git', ['git.exe', 'git'], ['--version'], env),
     runGuardSelfTest(projectDir, { ...options.guard, env }),
     loadPty(),
   ]);
+
+  let supervisor: SupervisorPreflight = {
+    status: undefined,
+    reachable: false,
+    versionMismatch: false,
+    diagnostic: claude === null ? 'Claude CLI is unavailable, so supervisor status was not queried.' : undefined,
+  };
+  if (claude !== null) {
+    const result = await probe(claude.bin, ['daemon', 'status'], env);
+    const status = result.output === '' ? undefined : parseDaemonStatus(result.output);
+    supervisor = {
+      status,
+      reachable: status?.controlSocketReachable === true,
+      versionMismatch:
+        status?.version !== undefined &&
+        claude.version !== undefined &&
+        status.version !== claude.version,
+      diagnostic:
+        result.missing
+          ? 'Claude CLI disappeared before supervisor status could be queried.'
+          : status === undefined
+            ? 'Supervisor status returned no output.'
+            : status.recognized
+              ? undefined
+              : 'Supervisor status used an unrecognized output shape; raw output is retained.',
+    };
+  }
 
   return {
     checkedAt: new Date().toISOString(),
@@ -121,6 +175,7 @@ export async function runLaunchPreflight(
     supportedPlatform: process.platform === 'win32',
     claude,
     powershell,
+    bash,
     git,
     node: {
       name: 'node',
@@ -130,6 +185,7 @@ export async function runLaunchPreflight(
       discoveredVia: 'process',
     },
     guardSelfTest,
+    supervisor,
     hookConfig: generateGateConfig({ scriptLocation: 'source' }),
     ptyAvailable: pty !== null,
   };

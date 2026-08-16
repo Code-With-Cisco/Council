@@ -1,4 +1,5 @@
 import type { StartSessionOutcome } from '../integration/client.js';
+import type { DaemonStopOutcome } from '../integration/types.js';
 import type { ReplyOutcome } from '../integration/pty/attach.js';
 import type { Snapshot } from '../integration/runtime.js';
 import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
@@ -33,6 +34,7 @@ export const IPC_CHANNELS = {
   clearBinding: 'dc:clear-binding',
   stopSession: 'dc:stop-session',
   wakeSquad: 'dc:wake-squad',
+  recoverSupervisor: 'dc:recover-supervisor',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -64,8 +66,9 @@ export interface UiWorkspaceState {
 }
 
 export interface UiExecutableStatus {
-  readonly name: 'PowerShell' | 'git' | 'node';
+  readonly name: 'PowerShell' | 'Git Bash' | 'git' | 'node';
   readonly available: boolean;
+  readonly resolvedPath: string | undefined;
   readonly version: string | undefined;
   readonly discoveredVia: 'candidate-probe' | 'process' | 'not-found';
 }
@@ -82,11 +85,22 @@ export interface UiLaunchPreflight {
       }
     | null;
   readonly powershell: UiExecutableStatus;
+  readonly bash: UiExecutableStatus;
   readonly git: UiExecutableStatus;
   readonly node: UiExecutableStatus;
   readonly guardSelfTest: {
     readonly status: 'passed' | 'failed' | 'unavailable';
     readonly message: string;
+  };
+  readonly supervisor: {
+    readonly recognized: boolean;
+    readonly running: boolean;
+    readonly reachable: boolean;
+    readonly version: string | undefined;
+    readonly workerCount: number | undefined;
+    readonly versionMismatch: boolean;
+    readonly diagnostic: string | undefined;
+    readonly raw: string;
   };
   readonly hookHandlerCount: number;
   readonly ptyAvailable: boolean;
@@ -132,6 +146,7 @@ export interface DecagramCouncilApi {
   clearBinding(profileId: string): Promise<UiResult<string>>;
   stopSession(profileId: string): Promise<UiResult<string>>;
   wakeSquad(): Promise<UiResult<string>>;
+  recoverSupervisor(): Promise<UiResult<DaemonStopOutcome>>;
   logs(profileId: string): Promise<UiResult<string>>;
   reply(profileId: string, message: string): Promise<UiResult<ReplyOutcome>>;
   council(

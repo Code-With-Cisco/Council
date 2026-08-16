@@ -8,9 +8,9 @@
  *   $ echo $?
  *   0
  *
- * So exit codes carry almost no signal and the only reliable discriminator is
- * the output text. Everything here is pattern matching, kept in one place so a
- * CLI wording change is a one-file fix rather than a hunt.
+ * So exit codes carry almost no signal. The reliable discriminator is a whole
+ * CLI diagnostic line, not a phrase appearing anywhere in output: agent logs
+ * are arbitrary prose and may mention the same words as a CLI error.
  */
 
 import type { CliFailureKind } from '../types.js';
@@ -26,17 +26,16 @@ interface Pattern {
  * bad id — that is the actionable half.
  */
 const FAILURE_PATTERNS: readonly Pattern[] = [
-  { kind: 'unknown-session', test: /\bNo job matching\b/i },
-  { kind: 'unknown-session', test: /\bunknown session\b/i },
-  { kind: 'daemon-unreachable', test: /connect ENOENT .*control\.sock/i },
-  { kind: 'daemon-unreachable', test: /control\.sock:\s*unreachable/i },
-  { kind: 'daemon-unreachable', test: /\b(daemon|supervisor) (is )?not running\b/i },
-  { kind: 'daemon-unreachable', test: /Couldn't (read|reach|connect)/i },
-  { kind: 'not-authenticated', test: /\b(not logged in|please (run )?\/?login|authentication (failed|required))\b/i },
-  { kind: 'not-authenticated', test: /\bInvalid API key\b/i },
-  { kind: 'cli-error', test: /^error:/im },
-  { kind: 'cli-error', test: /\bunknown option\b/i },
-  { kind: 'cli-error', test: /\bunknown command\b/i },
+  { kind: 'unknown-session', test: /^\s*No job matching\b.*$/im },
+  { kind: 'unknown-session', test: /^\s*(?:error:\s*)?unknown session\b.*$/im },
+  { kind: 'daemon-unreachable', test: /^\s*connect ENOENT .*control\.sock\s*$/im },
+  { kind: 'daemon-unreachable', test: /^\s*control\.sock:\s*unreachable\b.*$/im },
+  { kind: 'daemon-unreachable', test: /^\s*(?:daemon|supervisor) (?:is )?not running\s*$/im },
+  { kind: 'daemon-unreachable', test: /^\s*Couldn't read logs for\b.*$/im },
+  { kind: 'not-authenticated', test: /^\s*(?:error:\s*)?(?:not logged in|please (?:run )?\/?login|authentication (?:failed|required))\b.*$/im },
+  { kind: 'not-authenticated', test: /^\s*(?:error:\s*)?Invalid API key\b.*$/im },
+  { kind: 'cli-error', test: /^\s*error:.*$/im },
+  { kind: 'cli-error', test: /^\s*(?:error:\s*)?unknown (?:option|command)\b.*$/im },
 ];
 
 /**

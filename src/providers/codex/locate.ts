@@ -21,7 +21,6 @@ export interface LocateCodexOptions {
   readonly env?: NodeJS.ProcessEnv | undefined;
   readonly home?: string | undefined;
   readonly resourcesPath?: string | undefined;
-  readonly platform?: NodeJS.Platform | undefined;
   readonly probe?: ((executable: string) => Promise<CodexProbeResult>) | undefined;
   readonly exists?: ((candidate: string) => Promise<boolean>) | undefined;
 }
@@ -101,14 +100,8 @@ async function exists(candidate: string): Promise<boolean> {
 async function npmNativeCandidates(
   home: string,
   env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
 ): Promise<string[]> {
-  const packageNames =
-    platform === 'win32'
-      ? ['@openai/codex-win32-x64', '@openai/codex-win32-arm64']
-      : platform === 'darwin'
-        ? ['@openai/codex-darwin-arm64', '@openai/codex-darwin-x64']
-        : ['@openai/codex-linux-x64', '@openai/codex-linux-arm64'];
+  const packageNames = ['@openai/codex-win32-x64', '@openai/codex-win32-arm64'];
   const npmRoots = [
     path.join(home, '.npm-global', 'lib', 'node_modules'),
     path.join(home, '.local', 'lib', 'node_modules'),
@@ -117,7 +110,7 @@ async function npmNativeCandidates(
   if (appData !== undefined && appData !== '') {
     npmRoots.push(path.join(appData, 'npm', 'node_modules'));
   }
-  const executable = platform === 'win32' ? 'codex.exe' : 'codex';
+  const executable = 'codex.exe';
   const candidates: string[] = [];
   for (const root of npmRoots) {
     for (const packageName of packageNames) {
@@ -147,12 +140,11 @@ async function npmNativeCandidates(
 export async function locateCodex(
   options: LocateCodexOptions = {},
 ): Promise<LocatedCodex | null> {
-  const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const home = options.home ?? homedir();
   const probe = options.probe ?? probeCodexExecutable;
   const candidateExists = options.exists ?? exists;
-  const binaryName = platform === 'win32' ? 'codex.exe' : 'codex';
+  const binaryName = 'codex.exe';
   const candidates: Array<{
     executable: string;
     via: LocatedCodex['discoveredVia'];
@@ -188,48 +180,39 @@ export async function locateCodex(
       },
     );
   }
-  if (platform === 'darwin') {
-    candidates.push({
-      executable: '/Applications/ChatGPT.app/Contents/Resources/codex',
-      via: 'chatgpt',
-      requiresExistence: true,
-    });
-  }
-  if (platform === 'win32') {
-    const localAppData = env['LOCALAPPDATA'];
-    if (localAppData !== undefined && localAppData !== '') {
-      candidates.push(
-        {
-          executable: path.join(
-            localAppData,
-            'Programs',
-            'ChatGPT',
-            'resources',
-            'codex.exe',
-          ),
-          via: 'chatgpt',
-          requiresExistence: true,
-        },
-        {
-          executable: path.join(
-            localAppData,
-            'OpenAI',
-            'ChatGPT',
-            'resources',
-            'codex.exe',
-          ),
-          via: 'chatgpt',
-          requiresExistence: true,
-        },
-      );
-    }
+  const localAppData = env['LOCALAPPDATA'];
+  if (localAppData !== undefined && localAppData !== '') {
+    candidates.push(
+      {
+        executable: path.join(
+          localAppData,
+          'Programs',
+          'ChatGPT',
+          'resources',
+          'codex.exe',
+        ),
+        via: 'chatgpt',
+        requiresExistence: true,
+      },
+      {
+        executable: path.join(
+          localAppData,
+          'OpenAI',
+          'ChatGPT',
+          'resources',
+          'codex.exe',
+        ),
+        via: 'chatgpt',
+        requiresExistence: true,
+      },
+    );
   }
   candidates.push({
     executable: path.join(home, '.local', 'bin', binaryName),
     via: 'well-known',
     requiresExistence: true,
   });
-  for (const executable of await npmNativeCandidates(home, env, platform)) {
+  for (const executable of await npmNativeCandidates(home, env)) {
     candidates.push({
       executable,
       via: 'well-known',
@@ -239,10 +222,7 @@ export async function locateCodex(
 
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    const identity =
-      platform === 'win32'
-        ? candidate.executable.toLocaleLowerCase('en-US')
-        : candidate.executable;
+    const identity = candidate.executable.toLocaleLowerCase('en-US');
     if (seen.has(identity)) continue;
     seen.add(identity);
     if (

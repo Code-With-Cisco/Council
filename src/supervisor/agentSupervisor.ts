@@ -71,11 +71,9 @@ function domainFailure(message: string, argv: readonly string[] = []): CliFailur
 }
 
 export function isSafePlainTextReplyState(session: Session | undefined): boolean {
-  return (
-    session?.state === 'blocked' &&
-    session.waitingFor === 'input needed' &&
-    session.id !== undefined
-  );
+  if (session?.id === undefined) return false;
+  if (session.state === 'done' || session.state === 'failed') return true;
+  return session.state === 'blocked' && session.waitingFor === 'input needed';
 }
 
 /**
@@ -302,7 +300,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
         action: async (session) => {
           if (!isSafePlainTextReplyState(session)) {
             return domainFailure(
-              'One-line Reply is available only when the exact session is waiting for ordinary text input.',
+              'One-line Reply is available only for ordinary text input or a resumable done/failed session. Explicitly stopped sessions stay stopped.',
               ['attach', session.id!],
             );
           }

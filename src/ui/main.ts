@@ -87,6 +87,7 @@ app.setName(APP_NAME);
 let mainWindow: BrowserWindow | undefined;
 let supervisor: AgentSupervisorPort | undefined;
 let claudeSupervisor: ClaudeCodeAgentSupervisor | undefined;
+let claudeRuntimeClient: ClaudeClient | undefined;
 let missionUiController: MissionUiController | undefined;
 let missionWorktrees: WorktreeLeaseManager | undefined;
 let definitionWatcher: AgentDefinitionWatcher | undefined;
@@ -234,6 +235,7 @@ function toUiPreflight(preflight: LaunchPreflight): UiLaunchPreflight {
   ): UiLaunchPreflight['powershell'] => ({
     name: status.name,
     available: status.available,
+    resolvedPath: status.executable,
     version: status.version,
     discoveredVia: status.discoveredVia,
   });
@@ -253,11 +255,22 @@ function toUiPreflight(preflight: LaunchPreflight): UiLaunchPreflight {
             discoveredVia: preflight.claude.discoveredVia,
           },
     powershell: executable(preflight.powershell),
+    bash: executable(preflight.bash),
     git: executable(preflight.git),
     node: executable(preflight.node),
     guardSelfTest: {
       status: preflight.guardSelfTest.status,
       message: preflight.guardSelfTest.message,
+    },
+    supervisor: {
+      recognized: preflight.supervisor.status?.recognized ?? false,
+      running: preflight.supervisor.status?.running ?? false,
+      reachable: preflight.supervisor.reachable,
+      version: preflight.supervisor.status?.version,
+      workerCount: preflight.supervisor.status?.workerCount,
+      versionMismatch: preflight.supervisor.versionMismatch,
+      diagnostic: preflight.supervisor.diagnostic,
+      raw: preflight.supervisor.status?.raw ?? '',
     },
     hookHandlerCount,
     ptyAvailable: preflight.ptyAvailable,
@@ -428,6 +441,16 @@ function registerIpc(): void {
       chooseWorkspace,
       getSupervisor: () => (supervisorActionsReady ? supervisor : undefined),
       getMissionController: () => missionUiController,
+      recoverSupervisor: async () => {
+        if (claudeRuntimeClient === undefined) {
+          return unavailable('Claude CLI is unavailable.');
+        }
+        const result = await claudeRuntimeClient.daemonStop({
+          any: true,
+          keepWorkers: true,
+        });
+        return toUiResult(result);
+      },
       canLaunchDefinitions: () =>
         currentState?.capabilities.start === true &&
         currentState.snapshot !== undefined &&
@@ -613,6 +636,7 @@ async function disposeActiveRuntime(): Promise<void> {
   const active = supervisor;
   supervisor = undefined;
   claudeSupervisor = undefined;
+  claudeRuntimeClient = undefined;
 
   const failures: unknown[] = [];
   const watcherResults = await Promise.allSettled([
@@ -965,6 +989,7 @@ async function activateWorkspace(
 
   if (preflight.claude !== null && preflight.claude.meetsMinimum) {
     const client = ClaudeClient.fromBinary(preflight.claude.bin);
+    claudeRuntimeClient = client;
     const provider = new ClaudeProviderAdapter(client, {
       ptyAvailable: preflight.ptyAvailable,
     });
@@ -1698,7 +1723,7 @@ const singleInstance = acquireSingleInstance(
 );
 
 const allowUnsupportedDevelopment =
-  !app.isPackaged && process.env['DECAGRAM_COUNCIL_ALLOW_NON_WINDOWS_DEV'] !== '0';
+  !app.isPackaged && process.env['DECAGRAM_COUNCIL_ALLOW_NON_WINDOWS_DEV'] === '1';
 
 if (singleInstance.primary) {
   if (process.platform !== 'win32' && !allowUnsupportedDevelopment) {

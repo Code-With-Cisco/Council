@@ -119,6 +119,11 @@
                 </p>
                 <ul id="unassigned-sessions"></ul>
               </section>
+              <section class="message-panel roster-surface">
+                <h3>Background session roster</h3>
+                <p class="muted">Session state and process liveness are shown independently.</p>
+                <div id="background-roster" aria-live="polite"></div>
+              </section>
             </div>
             <aside id="session-detail" class="detail-panel">
               <p class="eyebrow">SESSION DETAIL</p>
@@ -316,6 +321,14 @@
           </div>
           <div id="diagnostics-grid" class="diagnostics-grid"></div>
           <section class="message-panel">
+            <h3>Supervisor recovery</h3>
+            <p class="muted">Stops the supervisor while keeping detached workers. The next roster read restarts it.</p>
+            <button id="recover-supervisor-button" class="button button-danger" type="button">
+              Restart supervisor safely
+            </button>
+            <pre id="recovery-output" class="log-output">No recovery action has run.</pre>
+          </section>
+          <section class="message-panel">
             <h3>Startup messages</h3>
             <ul id="startup-messages"></ul>
           </section>
@@ -324,7 +337,7 @@
 
       <footer>
         <span id="global-feedback" role="status">Ready.</span>
-        <span>macOS development · Windows production</span>
+        <span>Windows desktop</span>
       </footer>
     </div>
     <script src="./mission-view-model.js"></script>

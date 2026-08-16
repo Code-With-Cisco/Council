@@ -47,14 +47,13 @@ test, and acceptance programs. They may not use PowerShell itself as an editor.
 
 The shell dispatcher blocks redirection, content-writing cmdlets, file mutation
 cmdlets, `Tee-Object`, direct .NET file writes, dynamic evaluation, encoded
-commands, dynamic script blocks, nested process launch, here-strings, and a
-variable call operator. Commands such as `npm run build`, `npm test`, `node`,
-and `tsc` remain allowed.
+commands, dynamic script blocks, nested process launch, here-strings, a
+variable call operator, and inline interpreter escapes such as `node -e`,
+`python -c`, `cmd /c`, and nested PowerShell command strings. Commands such as
+`npm run build`, `npm test`, and `tsc` remain allowed.
 
-This is a construct-level check, not containment. A shell-capable agent can
-write indirectly by creating and running a program. The git check in
-`story-gate.ps1` detects a forbidden changed path at completion regardless of
-which mechanism created it. Neither layer is a security boundary.
+This is a construct-level check, not a security boundary. The completion gate
+also checks git-visible changed paths against the agent's ownership policy.
 
 ## Story acceptance
 
@@ -62,6 +61,11 @@ The story `acceptance` field is a Windows PowerShell command. The gate rejects
 obvious POSIX-only syntax (`bash`, `sh`, `./script`, `/bin/...`) and status
 masking. It then executes the command in a fresh non-interactive PowerShell
 process from the project root.
+
+Write-hook payload inspection also enforces story-field ownership. Test Engineer
+may use `Edit` only for an existing one-line `acceptance:` field; it cannot use
+`Write` to replace a story. PRD Lead may edit story product content but cannot
+change `acceptance:` or replace an entire story with `Write`.
 
 Example:
 
@@ -91,5 +95,4 @@ pwsh -NoProfile -File .\scripts\gates\guard-self-test.ps1 -ProjectDir $PWD
 ```
 
 The PowerShell test suites are skipped with an explicit reason when neither
-`pwsh` nor `powershell` exists. A skipped suite is implemented-unverified, not
-a passing Windows claim.
+`pwsh` nor `powershell` exists. A skipped suite is not a passing Windows claim.

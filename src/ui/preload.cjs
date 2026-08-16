@@ -11,6 +11,7 @@ const channels = {
   clearBinding: 'dc:clear-binding',
   stopSession: 'dc:stop-session',
   wakeSquad: 'dc:wake-squad',
+  recoverSupervisor: 'dc:recover-supervisor',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -49,6 +50,7 @@ contextBridge.exposeInMainWorld('decagramCouncil', {
   clearBinding: (profileId) => ipcRenderer.invoke(channels.clearBinding, profileId),
   stopSession: (profileId) => ipcRenderer.invoke(channels.stopSession, profileId),
   wakeSquad: () => ipcRenderer.invoke(channels.wakeSquad),
+  recoverSupervisor: () => ipcRenderer.invoke(channels.recoverSupervisor),
   logs: (profileId) => ipcRenderer.invoke(channels.logs, profileId),
   reply: (profileId, message) => ipcRenderer.invoke(channels.reply, profileId, message),
   council: (question, expectedDefinitionFingerprint) =>

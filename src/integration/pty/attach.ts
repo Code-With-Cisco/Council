@@ -206,6 +206,16 @@ export interface ReplyOutcome {
   readonly acknowledged: boolean;
 }
 
+/** A reply is safe only after the attach TUI emitted output and then quiesced. */
+export function isReplyTuiReady(
+  receivedOutput: boolean,
+  lastChunkAt: number,
+  now: number,
+  quietForMs = 400,
+): boolean {
+  return receivedOutput && now - lastChunkAt >= quietForMs;
+}
+
 /**
  * Delivers a plain-text message to a session and detaches.
  *
@@ -235,8 +245,10 @@ export async function sendReply(
 
   let transcript = '';
   let lastChunkAt = Date.now();
+  let receivedOutput = false;
   const stopCapture = session.onData((chunk) => {
     transcript += chunk;
+    receivedOutput = true;
     lastChunkAt = Date.now();
   });
 
@@ -247,8 +259,24 @@ export async function sendReply(
     // session has finished drawing and is waiting on input.
     const quietFor = 400;
     const deadline = startedAt + readyTimeoutMs;
-    while (Date.now() < deadline && Date.now() - lastChunkAt < quietFor) {
+    while (
+      Date.now() < deadline &&
+      !isReplyTuiReady(receivedOutput, lastChunkAt, Date.now(), quietFor)
+    ) {
       await delay(100);
+    }
+
+    if (!isReplyTuiReady(receivedOutput, lastChunkAt, Date.now(), quietFor)) {
+      session.detach();
+      return {
+        ok: false,
+        kind: 'timeout',
+        message: `The session did not draw a ready terminal within ${readyTimeoutMs}ms; no reply was sent.`,
+        raw: transcript,
+        argv,
+        exitCode: null,
+        durationMs: Date.now() - startedAt,
+      };
     }
 
     const beforeSend = transcript.length;

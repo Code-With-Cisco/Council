@@ -35,6 +35,7 @@ export interface CouncilIpcDependencies {
   readonly chooseWorkspace: () => Promise<UiResult<UiState>>;
   readonly getSupervisor: () => AgentSupervisorPort | undefined;
   readonly getMissionController: () => MissionUiController | undefined;
+  readonly recoverSupervisor: () => Promise<UiResult<import('../integration/types.js').DaemonStopOutcome>>;
   /** True only while the current definition projection is authoritative. */
   readonly canLaunchDefinitions: () => boolean;
   readonly confirmStartNew: () => Promise<boolean>;
@@ -178,6 +179,11 @@ export function registerCouncilIpc(
     const supervisor = dependencies.getSupervisor();
     if (supervisor === undefined) return unavailable('Claude integration is unavailable.');
     return dependencies.afterAction(await supervisor.wakeSquad());
+  });
+
+  registrar.handle(IPC_CHANNELS.recoverSupervisor, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.recoverSupervisor();
   });
 
   registrar.handle(IPC_CHANNELS.logs, async (event, rawProfileId) => {

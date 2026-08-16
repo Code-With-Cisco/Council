@@ -1,7 +1,7 @@
 'use strict';
 
 const api = window.decagramCouncil;
-const profileActions = window.CouncilSceneViewModel.createProfileActionRouter(api);
+const profileActions = window.DecagramCouncilSceneViewModel.createProfileActionRouter(api);
 const IDENTITY_COLORS = [
   '#7fa9dc',
   '#d9b36b',
@@ -91,7 +91,7 @@ function canStart(slot) {
 }
 
 function actionsFor(slot) {
-  return window.CouncilSceneViewModel.actionState(slot, {
+  return window.DecagramCouncilSceneViewModel.actionState(slot, {
     workspaceReady: state?.workspace.status === 'ready',
     trusted: state?.workspace.trusted === true,
     definitionStale: state?.snapshot?.definitionError !== undefined,
@@ -135,7 +135,7 @@ function shortSha(value) {
 }
 
 function assignmentBadge(profileId) {
-  return window.CouncilMissionViewModel.assignmentBadge(
+  return window.DecagramCouncilMissionViewModel.assignmentBadge(
     missionState,
     profileId,
   );
@@ -184,7 +184,7 @@ function renderAttention(snapshot) {
 }
 
 function renderOffice(snapshot) {
-  const scene = window.CouncilSceneViewModel.mapSnapshot(snapshot, {
+  const scene = window.DecagramCouncilSceneViewModel.mapSnapshot(snapshot, {
     page: officePage,
     perPage: AGENTS_PER_OFFICE,
     runtimeAvailable: state?.preflight?.claude?.meetsMinimum === true,
@@ -353,7 +353,7 @@ function renderSquad(snapshot) {
       start.disabled = !canStart(slot);
       start.addEventListener('click', async () => {
         await runAction(start, 'Starting…', () =>
-          window.CouncilSceneViewModel.invokeProfileStart(slot, profileActions),
+          window.DecagramCouncilSceneViewModel.invokeProfileStart(slot, profileActions),
         );
       });
       actions.append(start);
@@ -424,6 +424,71 @@ function renderUnassigned(snapshot) {
       ),
     );
   }
+}
+
+function processLiveness(session) {
+  if (typeof session.pid === 'number') return `Alive · PID ${session.pid}`;
+  if (session.state === 'done' || session.state === 'failed') {
+    return 'Exited · will resume on contact';
+  }
+  if (session.state === 'stopped') return 'Exited · explicitly stopped';
+  return 'Unknown · PID not reported';
+}
+
+function sessionAge(startedAt) {
+  if (!startedAt) return 'Unknown';
+  const milliseconds = Date.now() - new Date(startedAt).getTime();
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return 'Unknown';
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 1) return '<1 min';
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} hr`;
+  return `${Math.floor(hours / 24)} days`;
+}
+
+function renderBackgroundRoster(snapshot) {
+  const host = byId('background-roster');
+  host.replaceChildren();
+  const sessions = (snapshot?.roster.sessions ?? []).filter(
+    (session) => session.kind === 'background',
+  );
+  if (sessions.length === 0) {
+    host.append(
+      element(
+        'p',
+        'cold-state',
+        snapshot?.rosterError
+          ? 'The roster call failed. Its error is available in Diagnostics.'
+          : 'No background sessions yet. Start an agent when you are ready.',
+      ),
+    );
+    return;
+  }
+
+  const table = element('table', 'roster-table');
+  const head = element('thead');
+  const heading = element('tr');
+  for (const label of ['Name', 'Session state', 'Working directory', 'Age', 'Process liveness']) {
+    heading.append(element('th', '', label));
+  }
+  head.append(heading);
+  const body = element('tbody');
+  for (const session of sessions) {
+    const row = element('tr');
+    for (const value of [
+      session.name ?? 'Unknown',
+      session.state ?? 'Unknown',
+      session.cwd ?? 'Unknown',
+      sessionAge(session.startedAt),
+      processLiveness(session),
+    ]) {
+      row.append(element('td', '', value));
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  host.append(table);
 }
 
 function appendMeta(list, label, value) {
@@ -511,7 +576,7 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
       start.disabled = !canStart(slot);
       start.addEventListener('click', async () => {
         await runAction(start, 'Starting…', () =>
-          window.CouncilSceneViewModel.invokeProfileStart(slot, profileActions),
+          window.DecagramCouncilSceneViewModel.invokeProfileStart(slot, profileActions),
         );
       });
       panel.append(start);
@@ -575,12 +640,21 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
   const reply = element('input');
   reply.type = 'text';
   reply.placeholder = canReply(slot)
-    ? 'Send a plain-text reply'
+    ? session.state === 'done' || session.state === 'failed'
+      ? 'Send a reply and resume this conversation'
+      : 'Send a plain-text reply'
     : session.waitingFor && session.waitingFor !== 'input needed'
       ? `Reply disabled: waiting for ${session.waitingFor}`
-      : 'Reply unavailable unless waiting for ordinary text input';
+      : session.state === 'stopped'
+        ? 'Reply disabled: this session was explicitly stopped'
+        : 'Reply unavailable unless waiting for ordinary text input';
   reply.disabled = !canReply(slot);
-  const send = element('button', 'button button-primary', 'Send');
+  const wakesSession = session.state === 'done' || session.state === 'failed';
+  const send = element(
+    'button',
+    'button button-primary',
+    wakesSession ? 'Reply & resume' : 'Send',
+  );
   send.disabled = !canReply(slot);
   send.addEventListener('click', async () => {
     const result = await runAction(send, 'Sending…', () =>
@@ -600,7 +674,7 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
 
 function renderCouncil(snapshot) {
   const panel = byId('council-session');
-  const slot = window.CouncilSceneViewModel.findCouncilSlot(snapshot);
+  const slot = window.DecagramCouncilSceneViewModel.findCouncilSlot(snapshot);
   if (slot === undefined) {
     panel.replaceChildren(
       element('p', 'eyebrow', 'COUNCIL SESSION'),
@@ -641,7 +715,7 @@ function providerDisplayName(providerId) {
 
 function missionProviderStatus(providerId) {
   return (
-    window.CouncilMissionViewModel.providerStatus(missionState, providerId) ?? {
+    window.DecagramCouncilMissionViewModel.providerStatus(missionState, providerId) ?? {
       providerId,
       displayName: providerDisplayName(providerId),
       available: false,
@@ -673,7 +747,7 @@ function renderMissionProviders() {
       element('h3', '', provider.displayName),
       element(
         'span',
-        `provider-pill ${window.CouncilMissionViewModel.providerTone(provider)}`,
+        `provider-pill ${window.DecagramCouncilMissionViewModel.providerTone(provider)}`,
         providerReady(provider)
           ? 'Ready'
           : !provider.available
@@ -1032,7 +1106,7 @@ function renderSquadPreview() {
     blockers.append(element('li', '', blocker));
   }
   const start = byId('start-squad-button');
-  start.disabled = !window.CouncilMissionViewModel.canStartPreview(preview);
+  start.disabled = !window.DecagramCouncilMissionViewModel.canStartPreview(preview);
 }
 
 function renderIntegrationPreview() {
@@ -1053,7 +1127,7 @@ function renderIntegrationPreview() {
   appendMeta(meta, 'Approval revision', String(preview.approvalRevision));
   appendMeta(meta, 'Approval fingerprint', preview.digest);
   byId('approve-integration-button').disabled =
-    !window.CouncilMissionViewModel.canApproveIntegration(preview);
+    !window.DecagramCouncilMissionViewModel.canApproveIntegration(preview);
 }
 
 function gateLine(label, gate) {
@@ -1359,7 +1433,7 @@ function providerDiagnosticCards() {
       `${provider.displayName} provider`,
       value,
       detail,
-      window.CouncilMissionViewModel.providerTone(provider),
+      window.DecagramCouncilMissionViewModel.providerTone(provider),
     );
   });
 }
@@ -1393,9 +1467,15 @@ function renderDiagnostics() {
     messages.forEach((message) => list.append(element('li', '', message)));
     return;
   }
-  const daemon = snapshot?.daemon;
+  const daemon = snapshot?.daemon ?? p.supervisor;
   const daemonValue = !daemon ? 'Unavailable' : !daemon.recognized ? 'Unknown' : daemon.running ? 'Running' : 'Resting';
-  const daemonTone = !daemon || !daemon.recognized ? 'is-warning' : daemon.running ? 'is-good' : '';
+  const daemonTone = p.supervisor.versionMismatch
+    ? 'is-bad'
+    : !daemon || !daemon.recognized
+      ? 'is-warning'
+      : daemon.running
+        ? 'is-good'
+        : '';
   const guard = p.guardSelfTest;
   const guardPassed = guard.status === 'passed';
   const claudeUsable = p.claude?.meetsMinimum === true;
@@ -1404,12 +1484,31 @@ function renderDiagnostics() {
     diagnosticCard('Platform', p.supportedPlatform ? 'Windows supported' : `Unsupported: ${p.platform}`, 'Windows 10 or Windows 11 is required.', p.supportedPlatform ? 'is-good' : 'is-bad'),
     diagnosticCard('Claude CLI', !p.claude ? 'Not found' : claudeUsable ? 'Found' : 'Version too old', p.claude ? `${p.claude.version ?? 'version unknown'} · ${p.claude.discoveredVia}` : 'Install Claude Code for Windows or configure an override.', claudeUsable ? 'is-good' : 'is-bad'),
     diagnosticCard('PowerShell', p.powershell.available ? 'Available' : 'Missing', p.powershell.available ? `${p.powershell.version ?? 'version unknown'} · ${p.powershell.discoveredVia}` : 'Guard hooks require PowerShell.', p.powershell.available ? 'is-good' : 'is-bad'),
+    diagnosticCard(
+      'Git Bash',
+      p.bash.available ? 'Available' : 'Missing',
+      p.bash.available
+        ? `${p.bash.version ?? 'version unknown'} · ${p.bash.resolvedPath ?? p.bash.discoveredVia}`
+        : 'Install Git for Windows. Expected bash.exe under the Git installation bin directory.',
+      p.bash.available ? 'is-good' : 'is-bad',
+    ),
     diagnosticCard('Guard self-test', guardPassed ? 'Passed' : guard.status === 'failed' ? 'Failed' : 'Not verified', guardPassed ? 'Windows write and shell guards accepted their safety cases.' : guard.message, guardPassed ? 'is-good' : guard.status === 'failed' ? 'is-bad' : 'is-warning'),
     diagnosticCard('Git', p.git.available ? 'Available' : 'Missing', p.git.available ? `${p.git.version ?? 'version unknown'} · ${p.git.discoveredVia}` : 'Git for Windows is required.', p.git.available ? 'is-good' : 'is-bad'),
     diagnosticCard('Node.js', p.node.available ? 'Available' : 'Missing', `${p.node.version ?? 'version unknown'} · ${p.node.discoveredVia}`, p.node.available ? 'is-good' : 'is-bad'),
     diagnosticCard('Hook registration', `${hookCount} Windows handlers`, 'Edit|Write, PowerShell, TaskCompleted, and TeammateIdle are generated from one configuration.', hookCount === 4 ? 'is-good' : 'is-warning'),
     diagnosticCard('Terminal bridge', p.ptyAvailable ? 'Available' : 'Logs only', p.ptyAvailable ? 'Direct plain-text replies are enabled.' : 'Install the optional node-pty module to enable replies.', p.ptyAvailable ? 'is-good' : 'is-warning'),
-    diagnosticCard('Claude daemon', daemonValue, daemon?.raw || 'No verified daemon status has been read.', daemonTone),
+    diagnosticCard(
+      'Claude daemon',
+      p.supervisor.versionMismatch ? 'Version mismatch' : daemonValue,
+      [
+        `Reachable: ${p.supervisor.reachable ? 'yes' : 'no'}`,
+        `Version: ${p.supervisor.version ?? 'unknown'}`,
+        `Workers: ${p.supervisor.workerCount ?? 'unknown'}`,
+        p.supervisor.diagnostic,
+        daemon?.raw,
+      ].filter(Boolean).join('\n'),
+      daemonTone,
+    ),
     diagnosticCard('Agent catalog', state.catalog ? `${state.catalog.entries.length} definitions` : 'Unavailable', [...state.rosterProblems, ...(state.catalog?.diagnostics.map((problem) => problem.message) ?? [])].join(' · ') || 'Definitions and preferences parsed without reported problems.', state.rosterProblems.length || state.catalog?.diagnostics.length ? 'is-warning' : 'is-good'),
     diagnosticCard('Workspace', state.workspace.label ?? 'Unavailable', `${state.projectDir ?? 'No canonical path'}${state.workspace.developmentOverride ? ' · development override' : ''}`, state.workspace.status === 'ready' ? 'is-good' : 'is-warning'),
     diagnosticCard('Session bindings', state.bindingProblem ? 'Needs attention' : 'Loaded', state.bindingProblem?.message ?? 'Exact profile ownership store parsed without reported problems.', state.bindingProblem ? 'is-warning' : 'is-good'),
@@ -1482,6 +1581,7 @@ function render() {
   renderAttention(snapshot);
   renderOffice(snapshot);
   renderSquad(snapshot);
+  renderBackgroundRoster(snapshot);
   renderMissions(snapshot);
   renderCouncil(snapshot);
   renderDiagnostics();
@@ -1697,7 +1797,7 @@ byId('cancel-gate-button').addEventListener('click', () => {
 
 byId('start-squad-button').addEventListener('click', async (event) => {
   const preview = pendingSquadPreview;
-  if (!window.CouncilMissionViewModel.canStartPreview(preview)) return;
+  if (!window.DecagramCouncilMissionViewModel.canStartPreview(preview)) return;
   const result = await runAction(event.currentTarget, 'Starting…', () =>
     api.startSquad(preview.digest),
   );
@@ -1716,7 +1816,7 @@ byId('approve-integration-button').addEventListener(
   'click',
   async (event) => {
     const preview = pendingIntegrationPreview;
-    if (!window.CouncilMissionViewModel.canApproveIntegration(preview)) return;
+    if (!window.DecagramCouncilMissionViewModel.canApproveIntegration(preview)) return;
     const result = await runAction(event.currentTarget, 'Integrating…', () =>
       api.approveIntegration(preview.digest),
     );
@@ -1795,11 +1895,26 @@ byId('wake-button').addEventListener('click', async (event) => {
   await runAction(event.currentTarget, 'Waking…', () => api.wakeSquad());
 });
 
+byId('recover-supervisor-button').addEventListener('click', async (event) => {
+  const result = await runAction(event.currentTarget, 'Recovering…', () =>
+    api.recoverSupervisor(),
+  );
+  const output = byId('recovery-output');
+  if (!result?.ok) {
+    output.textContent = [result?.message, result?.details].filter(Boolean).join('\n');
+    return;
+  }
+  const recovery = result.value;
+  output.textContent = recovery.manualKillPid
+    ? `${recovery.raw}\nRun: taskkill /PID ${recovery.manualKillPid} /F`
+    : recovery.raw || (recovery.alreadyStopped ? 'No daemon was running.' : 'Supervisor stopped.');
+});
+
 byId('council-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector('button[type="submit"]');
   const feedback = byId('council-feedback');
-  const councilSlot = window.CouncilSceneViewModel.findCouncilSlot(
+  const councilSlot = window.DecagramCouncilSceneViewModel.findCouncilSlot(
     state?.snapshot,
   );
   const result = await runAction(button, 'Convening…', () =>

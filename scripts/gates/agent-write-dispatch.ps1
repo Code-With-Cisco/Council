@@ -2,6 +2,10 @@
 <#
 Settings-level dispatcher for Edit and Write.
 
+Exit 0 allows the tool call. Exit 2 blocks it. A guarded child returning any
+unexpected non-zero code is converted to 2 because Claude treats other codes as
+non-blocking hook errors.
+
 Unknown or absent agent_type is allowed so a normal user session is not gated.
 Once a guarded agent is recognized, malformed input and missing guard scripts
 fail closed.
@@ -44,4 +48,11 @@ if (-not (Test-Path -LiteralPath $guard -PathType Leaf)) {
 }
 
 & $guard -PayloadText $PayloadText
-exit $LASTEXITCODE
+$guardExit = $LASTEXITCODE
+if ($guardExit -eq 0) { exit 0 }
+if ($guardExit -ne 2) {
+    [Console]::Error.WriteLine(
+        "$agentType write guard failed unexpectedly with exit $guardExit. Blocking to fail closed."
+    )
+}
+exit 2

@@ -2,6 +2,10 @@
 <#
 Shared Windows guard logic for Decagram Council.
 
+Exit contract for every PreToolUse guard: 0 allows the action and 2 blocks it.
+Any internal or child-script result other than 0 is converted to 2 by the
+dispatcher so an unexpected failure cannot silently allow the action.
+
 All path decisions are case-insensitive and use forward slashes after
 normalization. Messages retain the original path spelling from the hook
 payload. These hooks are policy checks, not an operating-system security
@@ -81,12 +85,36 @@ function Resolve-GuardPath {
         throw "${AgentLabel} write guard: invalid target path ($filePath)"
     }
 
-    if (Test-Path -LiteralPath $absolute) {
-        try {
-            $absolute = (Resolve-Path -LiteralPath $absolute).Path
-        } catch {
-            # GetFullPath is still a normalized, conservative spelling.
+    # Walk each segment so an existing junction is resolved even when the final
+    # target does not exist. Resolve-Path preserves a junction's display path on
+    # Windows and therefore is not sufficient for containment by itself.
+    try {
+        $rooted = [IO.Path]::GetPathRoot($absolute)
+        # Keep the trailing separator: `C:` is drive-relative in PowerShell,
+        # while `C:\` and UNC roots are absolute.
+        $resolved = $rooted
+        $remainder = $absolute.Substring($rooted.Length)
+        foreach ($segment in ($remainder -split '[\\/]' | Where-Object { $_ -ne '' })) {
+            $next = Join-Path $resolved $segment
+            if (Test-Path -LiteralPath $next) {
+                $item = Get-Item -LiteralPath $next -Force
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $target = [string]$item.Target
+                    if ([string]::IsNullOrWhiteSpace($target)) {
+                        throw "could not resolve reparse point ($next)"
+                    }
+                    if (-not [IO.Path]::IsPathRooted($target)) {
+                        $target = Join-Path (Split-Path -Parent $next) $target
+                    }
+                    $resolved = [IO.Path]::GetFullPath($target)
+                    continue
+                }
+            }
+            $resolved = $next
         }
+        $absolute = [IO.Path]::GetFullPath($resolved)
+    } catch {
+        throw "${AgentLabel} write guard: could not resolve target path ($filePath)"
     }
 
     $root = [IO.Path]::GetFullPath($projectDir).TrimEnd('\', '/')
@@ -167,6 +195,38 @@ function Test-GuardStory {
     return Test-GuardLike $Path @('stories/*', 'docs/stories/*')
 }
 
+function Get-GuardStoryEditBlockReason {
+    param(
+        [string]$AgentType,
+        $Payload,
+        [string]$RelativePath
+    )
+
+    # Completion-time git ownership checks have no tool payload. The
+    # field-level decision is made synchronously by the PreToolUse guard.
+    if ($null -eq $Payload) { return $null }
+
+    $toolName = [string](Get-GuardProperty $Payload 'tool_name')
+    $toolInput = Get-GuardProperty $Payload 'tool_input'
+    $oldText = [string](Get-GuardProperty $toolInput 'old_string')
+    $newText = [string](Get-GuardProperty $toolInput 'new_string')
+    $touchesAcceptance =
+        $oldText -match '(?im)^\s*acceptance\s*:' -or
+        $newText -match '(?im)^\s*acceptance\s*:'
+
+    if ($AgentType -eq 'test-engineer') {
+        $oldOnlyAcceptance = $oldText -match '^\s*acceptance\s*:[^\r\n]*$'
+        $newOnlyAcceptance = $newText -match '^\s*acceptance\s*:[^\r\n]*$'
+        if ($toolName -ne 'Edit' -or -not $oldOnlyAcceptance -or -not $newOnlyAcceptance) {
+            return "Test Engineer may edit only the existing acceptance field with one Edit call ($RelativePath)."
+        }
+    }
+    if ($AgentType -eq 'prd-lead' -and ($toolName -ne 'Edit' -or $touchesAcceptance)) {
+        return "PRD Lead may edit story content but must not write or replace its executable acceptance field ($RelativePath)."
+    }
+    return $null
+}
+
 function Test-GuardPlanning {
     param([string]$Path)
     return Test-GuardLike $Path @(
@@ -208,7 +268,8 @@ function Test-GuardForeignMemory {
 function Get-GuardWriteBlockReason {
     param(
         [string]$AgentType,
-        [string]$RelativePath
+        [string]$RelativePath,
+        $Payload = $null
     )
 
     if (Test-GuardClaudeConfig $RelativePath) {
@@ -234,14 +295,18 @@ function Get-GuardWriteBlockReason {
         }
         'test-engineer' {
             if (Test-GuardTest $RelativePath) { return $null }
-            if (Test-GuardStory $RelativePath) { return $null }
+            if (Test-GuardStory $RelativePath) {
+                return Get-GuardStoryEditBlockReason $AgentType $Payload $RelativePath
+            }
             if (Test-GuardOwnMemory $RelativePath $AgentType) { return $null }
             return "Test Engineer may write only tests, story acceptance fields, and its own memory ($RelativePath)."
         }
         'prd-lead' {
             if (Test-GuardPrd $RelativePath) { return $null }
             if (Test-GuardEpic $RelativePath) { return $null }
-            if (Test-GuardStory $RelativePath) { return $null }
+            if (Test-GuardStory $RelativePath) {
+                return Get-GuardStoryEditBlockReason $AgentType $Payload $RelativePath
+            }
             if (Test-GuardPlanning $RelativePath) { return $null }
             if (Test-GuardOwnMemory $RelativePath $AgentType) { return $null }
             return "PRD Lead may write only planning artifacts and its own memory ($RelativePath)."

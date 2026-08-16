@@ -90,7 +90,7 @@
     );
   }
 
-  window.CouncilMissionViewModel = {
+  window.DecagramCouncilMissionViewModel = {
     assignmentsForProfile,
     assignmentBadge,
     providerStatus,
