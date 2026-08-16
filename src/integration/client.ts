@@ -310,7 +310,7 @@ export class ClaudeClient {
    * `treatOutputAsSuccess` is set because this command describes a down daemon
    * in prose that the error classifier would otherwise read as
    * `daemon-unreachable`. A stopped supervisor is the normal resting state in
-   * v2.1.220 — service install is disabled, so it runs on demand and exits when
+   * v2.1.233 — service install is disabled, so it runs on demand and exits when
    * the last client disconnects. Reading it is what tells us so.
    */
   async daemonStatus(): Promise<CliResult<DaemonStatus>> {

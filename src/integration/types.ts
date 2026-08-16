@@ -2,9 +2,9 @@
  * Domain types for the Claude Code integration layer.
  *
  * Everything here is derived from the shipped CLI surface of Claude Code
- * v2.1.220 (see docs/cli-surface.md for the probe transcript). The agent-view
- * CLI is a research preview: fields documented as optional really are absent in
- * practice, so parsers must never assume presence.
+ * v2.1.233 on Windows (see docs/cli-surface.md for the probe transcript). The
+ * agent-view CLI is a research preview: fields documented as optional really are
+ * absent in practice, so parsers must never assume presence.
  */
 
 /** Discriminates a roster row that is a real background job from a terminal a human is sitting at. */
@@ -16,8 +16,26 @@ export type SessionKind = 'interactive' | 'background';
  * Only background sessions carry a state; interactive rows omit it entirely.
  * `stopped` covers Ctrl+X, `claude stop`, and external process termination —
  * machine shutdown lands sessions in `failed`, not `stopped`.
+ *
+ * The four transitional states are not a guess: 2.1.233 carries them as its own
+ * named array (`["starting","resuming","adopted","crashed"]`) and groups all
+ * four behind one attach message, "Session is starting — it will appear once
+ * ready". `running` is what the supervisor writes once a session leaves them.
+ * They were absent from this union until 2.1.233 was probed on Windows, which
+ * meant a `crashed` session was dropped to `undefined` and then rendered as
+ * though it were healthy.
  */
-export type SessionState = 'working' | 'blocked' | 'done' | 'failed' | 'stopped';
+export type SessionState =
+  | 'working'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'stopped'
+  | 'starting'
+  | 'resuming'
+  | 'adopted'
+  | 'crashed'
+  | 'running';
 
 export const SESSION_STATES: readonly SessionState[] = [
   'working',
@@ -25,6 +43,25 @@ export const SESSION_STATES: readonly SessionState[] = [
   'done',
   'failed',
   'stopped',
+  'starting',
+  'resuming',
+  'adopted',
+  'crashed',
+  'running',
+];
+
+/**
+ * States the supervisor moves through while bringing a session back up.
+ *
+ * Mirrors the CLI's own array. `crashed` belongs here rather than with the
+ * terminal states: the supervisor restarts from it, so it is a stage on the way
+ * to `running`, not an end state a person has to act on.
+ */
+export const TRANSITIONAL_SESSION_STATES: readonly SessionState[] = [
+  'starting',
+  'resuming',
+  'adopted',
+  'crashed',
 ];
 
 /**
@@ -37,7 +74,8 @@ export type KnownWaitingFor =
   | 'input needed'
   | 'sandbox request'
   | 'worker request'
-  | 'dialog open';
+  | 'dialog open'
+  | 'goal proposal';
 
 export type WaitingFor = KnownWaitingFor | (string & {});
 
@@ -47,12 +85,16 @@ export const KNOWN_WAITING_FOR: readonly KnownWaitingFor[] = [
   'sandbox request',
   'worker request',
   'dialog open',
+  // Added in 2.1.233. The pass-through above is why this only ever showed up as
+  // unstyled text rather than vanishing, which is the behaviour to preserve:
+  // the CLI can also forward an arbitrary `topDialogWaitingFor` verbatim.
+  'goal proposal',
 ];
 
 /**
  * A row exactly as `claude agents --json` emits it, before any normalisation.
  *
- * Verified against v2.1.220: interactive rows carry only
+ * Verified against v2.1.233 on Windows: interactive rows carry only
  * `{pid, cwd, kind, startedAt, sessionId, name}` — no `id`, no `state`.
  */
 export interface RawRosterEntry {
@@ -79,7 +121,7 @@ export interface JobStateFile {
   readonly state?: string | undefined;
   /** Human-readable one-liner — last output line or terminal summary. */
   readonly detail?: string | undefined;
-  /** Observed values: 'idle' | 'active'. Kept as string; undocumented. */
+  /** Observed values: 'idle' | 'active' | 'blocked'. Kept as string; undocumented. */
   readonly tempo?: string | undefined;
   readonly output?: string | null | undefined;
   readonly children?: unknown;
@@ -146,7 +188,7 @@ export interface DaemonStatus {
   readonly recognized: boolean;
   /**
    * A down daemon is NORMAL, not an error: service install is disabled in
-   * v2.1.220, so the supervisor starts on demand and exits when the last
+   * v2.1.233, so the supervisor starts on demand and exits when the last
    * client disconnects. Never surface this as a fault.
    */
   readonly running: boolean;

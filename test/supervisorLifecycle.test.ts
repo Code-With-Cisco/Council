@@ -154,7 +154,7 @@ function lifecycleClient(initialSessions: readonly Session[] = []): LifecycleCli
   const client = {
     cli: {
       bin: 'claude.exe',
-      version: '2.1.220',
+      version: '2.1.233',
       meetsMinimum: true,
       discoveredVia: 'override',
     },

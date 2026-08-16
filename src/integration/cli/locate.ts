@@ -16,10 +16,12 @@ import { runClaude } from './exec.js';
  * Lowest Claude Code version this app has been verified against.
  *
  * The agent-view CLI is a research preview whose surface changes between
- * versions; every command and JSON field used here was probed against 2.1.220.
- * Earlier versions are untested rather than known-broken.
+ * versions; every command and JSON field used here was probed against 2.1.233 on
+ * Windows. Earlier versions are untested rather than known-broken — though note
+ * that `claude agents --json` does not exist at all as far back as 2.1.143, so
+ * the roster is genuinely unreadable there rather than merely unverified.
  */
-export const MINIMUM_CLAUDE_VERSION = '2.1.220';
+export const MINIMUM_CLAUDE_VERSION = '2.1.233';
 
 const BIN = process.platform === 'win32' ? 'claude.exe' : 'claude';
 
@@ -113,7 +115,7 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Extracts `2.1.220` from `2.1.220 (Claude Code)`. */
+/** Extracts `2.1.233` from `2.1.233 (Claude Code)`. */
 export function parseVersion(raw: string): string | undefined {
   return /(\d+\.\d+\.\d+)/.exec(raw)?.[1];
 }

@@ -2,7 +2,7 @@
  * PTY-backed interaction with a background session.
  *
  * WHY THIS EXISTS: the original spec assumed a lightweight `claude reply <id>`
- * command. There isn't one. Verified against v2.1.220 — the complete set of
+ * command. There isn't one. Re-verified against v2.1.233 — the complete set of
  * session subcommands is attach / logs / stop / kill / respawn / rm / daemon,
  * and `claude reply <id> "text"` falls through to the default command, which
  * would start a brand new interactive session whose first prompt is the literal

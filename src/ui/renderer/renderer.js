@@ -105,15 +105,21 @@ function canReply(slot) {
 }
 
 function statusClass(stateName) {
-  if (stateName === 'working' || stateName === 'done') return 'is-good';
+  if (stateName === 'working' || stateName === 'done' || stateName === 'running') {
+    return 'is-good';
+  }
   if (stateName === 'blocked') return 'is-warning';
   if (
     stateName === 'failed' ||
+    // Auto-restarted by the supervisor, but still a failure a person should see.
+    stateName === 'crashed' ||
     stateName === 'stale binding' ||
     stateName.startsWith('definition ')
   ) {
     return 'is-bad';
   }
+  // starting / resuming / adopted deliberately fall through to neutral: they are
+  // brief and self-resolving, and colouring them would flicker the squad screen.
   return '';
 }
 

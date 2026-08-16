@@ -28,6 +28,23 @@
  *     roster.json:  absent
  *     daemon.log:   absent
  *
+ * The same shape on Windows (2.1.233), where the transport is a named pipe
+ * rather than a unix socket. The labels are unchanged, which is why one parser
+ * covers both — only the values differ:
+ *
+ *   not running
+ *
+ *   bg sessions:
+ *     sock dir:     \\.\pipe\cc-daemon-*
+ *     control.sock: unreachable (connect ENOENT \\.\pipe\cc-daemon-*-control)
+ *     bg workers:   0 in roster.json (control unreachable)
+ *     roster.json:  absent
+ *     daemon.log:   absent
+ *
+ * Note the `bg workers` line contains the substring "roster.json" too. Every
+ * field read here is `^`-anchored so that line cannot be mistaken for the
+ * `roster.json:` field below it.
+ *
  * A stopped daemon is the ordinary resting state, not a fault: service install
  * is disabled in this version, so the supervisor starts on demand and exits
  * when the last client disconnects. The UI must not present it as broken.

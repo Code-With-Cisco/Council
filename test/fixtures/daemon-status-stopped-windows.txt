@@ -1,0 +1,8 @@
+not running
+
+bg sessions:
+  sock dir:     \\.\pipe\cc-daemon-*
+  control.sock: unreachable (connect ENOENT \\.\pipe\cc-daemon-*-control)
+  bg workers:   0 in roster.json (control unreachable)
+  roster.json:  absent
+  daemon.log:   absent

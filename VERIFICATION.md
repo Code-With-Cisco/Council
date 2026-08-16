@@ -375,3 +375,88 @@ to resolve it is stated; none were performed, because each has side effects.
 
 8. **Whether the supervisor version matches the CLI version.** No supervisor is
    running, so no version is emitted for comparison.
+
+---
+
+## 6. Post-audit update — CLI upgraded to 2.1.233
+
+Sections 1 to 5 are the audit as taken against 2.1.143 and are left unchanged.
+This section records what happened next.
+
+The installed CLI was upgraded with `claude install latest`, taking the host from
+2.1.143 to **2.1.233**. Registry state at the time: `stable` 2.1.224, `latest`
+2.1.233. The installer reported one setup note, which is still outstanding:
+
+```
+Native installation exists but C:\Users\User\.local\bin is not in your PATH.
+```
+
+`src/integration/cli/locate.ts` probes `~/.local/bin` as a well-known directory,
+so discovery does not depend on that PATH entry being fixed.
+
+### Re-probed on 2.1.233 (Windows)
+
+- `claude agents --json` **exists and works**, exit 0. `--all` is documented as
+  "With --json: also include completed background sessions". `--json` is
+  documented as "does not require a TTY".
+- Live output confirms the interactive row shape assumed by `types.ts`:
+  `{pid, cwd, kind, startedAt, sessionId, name}` — no `id`, no `state`.
+- Subcommand set unchanged: `attach`, `logs`, `stop`, `kill`, `respawn`, `rm`
+  each print their own usage; `reply` still does not exist and falls through to
+  root help.
+- `claude daemon --help` unchanged, including `stop --any --keep-workers` and
+  "Service install is disabled in this version".
+- `claude daemon status` still reports not running, with the named-pipe form now
+  generalised to `\\.\pipe\cc-daemon-*-control`.
+- Session states still exceed the five originally modelled. 2.1.233 carries
+  `["starting","resuming","adopted","crashed"]` as its own named array, plus
+  `running`.
+- `waitingFor` gained a sixth value, `goal proposal`, and can also forward an
+  arbitrary `topDialogWaitingFor` verbatim.
+- `TeamCreate`, `TeamDelete`, `ListAgents`, `SendMessage` and
+  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` are all still present.
+
+### Blocking issues resolved
+
+- **#1 (`agents --json` missing)** — resolved by the upgrade. No code change was
+  needed; the command exists again.
+- **#2 (below enforced minimum)** — resolved. `MINIMUM_CLAUDE_VERSION` is now
+  `2.1.233` and the installed CLI matches, so `meetsMinimum` passes and the
+  runtime starts.
+- **#3 (unhandled states)** — resolved in code. `SessionState` now carries the
+  five additional states, `deriveCold` treats the transitional ones as hosted
+  rather than dormant, and the UI renders `crashed` as a failure instead of
+  silently as healthy.
+
+### Blocking issues still open
+
+- **#4** no Windows `taskkill` recovery path.
+- **#5** `daemonStop()` still has no caller.
+- **#6** reply remains gated on `blocked` + `input needed`. Unchanged
+  deliberately: widening it is a product decision, not a version alignment.
+- **#7** roster, job, team and task file shapes remain unverified; no background
+  session has been dispatched on this host.
+- **#8** `README 2.md` is still committed.
+
+Open questions 1 to 7 in section 5 are unchanged. Question 8 remains open: no
+supervisor has run, so its version is still unobservable.
+
+### Test suite state on Windows
+
+`npx tsc --noEmit` passes. `npm test` reports **8 failed / 399 passed**. The same
+eight tests fail at `HEAD` without any of these changes (**8 failed / 397
+passed**, measured by stashing), so all eight are pre-existing Windows breakages
+rather than regressions. They fall into three groups:
+
+1. `test/board.test.ts` (2) — POSIX expectations. Asserts `claudeConfigDir` yields
+   `/custom/claude`; on Windows `path.resolve` correctly yields
+   `C:\custom\claude`. Test-side, not product-side.
+2. `test/gitClient.test.ts` (3) and `test/missionGitAdapter.test.ts` (1) — Windows
+   Git behaviour, including CRLF (`'candidate\r\n'` where `'candidate\n'` is
+   expected).
+3. `test/gates.test.ts` (1) and `test/shell-guards.test.ts` (1) — PowerShell
+   suites that were skipped on the macOS host and now execute here, exceeding the
+   5s default timeout.
+
+Group 3 means two rows of `docs/windows-verification.md` (Write guards, Shell
+construct guard) can no longer be described as unrunnable on this host.

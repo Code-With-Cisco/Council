@@ -10,6 +10,19 @@
       if (slot.session.state === 'failed') return 'failed';
       if (slot.session.state === 'done') return 'done';
       if (slot.session.state === 'stopped') return 'stopped';
+      // Supervisor-hosted states added in 2.1.233. They have no scene of their
+      // own, so they borrow the closest honest one: a session coming up reads as
+      // active, and a crashed one shows the failure marker even though the
+      // supervisor restarts it — the alternative was rendering it as healthy.
+      if (slot.session.state === 'crashed') return 'failed';
+      if (
+        slot.session.state === 'running' ||
+        slot.session.state === 'starting' ||
+        slot.session.state === 'resuming' ||
+        slot.session.state === 'adopted'
+      ) {
+        return slot.session.cold ? 'cold' : 'working';
+      }
       return slot.session.cold ? 'cold' : 'idle';
     }
     if (slot.validation?.launchable === false) return 'failed';

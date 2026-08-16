@@ -71,6 +71,18 @@ describe('parseRoster', () => {
     }
   });
 
+  it('keeps the transitional states the supervisor restarts through', () => {
+    // 2.1.233 carries these as its own array and groups them behind one attach
+    // message. Before they were recognised they fell through to `undefined`,
+    // which rendered a crashed session as though nothing were wrong.
+    for (const state of ['starting', 'resuming', 'adopted', 'crashed', 'running']) {
+      const parsed = parseRoster([{ id: 'e', kind: 'background', state }])[0];
+      expect(parsed?.state).toBe(state);
+      // Recovering, not resting — a person should not be invited to act on it.
+      expect(parsed?.cold).toBe(false);
+    }
+  });
+
   it('does not mark a session dormant when the state is unknown', () => {
     // Failing toward "looks normal" beats falsely showing an agent asleep.
     expect(parseRoster([{ id: 'd', kind: 'background' }])[0]?.cold).toBe(false);
@@ -147,6 +159,21 @@ describe('parseDaemonStatus', () => {
     expect(status.running).toBe(false);
     expect(status.pid).toBeUndefined();
     expect(status.controlSocketReachable).toBe(false);
+    expect(status.workerCount).toBe(0);
+    expect(status.rosterPresent).toBe(false);
+  });
+
+  it('reads the Windows named-pipe form of a stopped daemon', () => {
+    // Captured verbatim from `claude daemon status` on Windows with 2.1.233.
+    // The labels are identical to the POSIX form; only the transport differs,
+    // so this must not degrade to `recognized: false`.
+    const status = parseDaemonStatus(readFixture('daemon-status-stopped-windows.txt'));
+    expect(status.recognized).toBe(true);
+    expect(status.running).toBe(false);
+    expect(status.socketDir).toBe('\\\\.\\pipe\\cc-daemon-*');
+    expect(status.controlSocketReachable).toBe(false);
+    // The `bg workers` line also contains "roster.json"; the anchored field
+    // reads must not pick it up in place of the real `roster.json:` line.
     expect(status.workerCount).toBe(0);
     expect(status.rosterPresent).toBe(false);
   });

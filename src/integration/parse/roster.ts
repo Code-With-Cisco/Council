@@ -55,6 +55,15 @@ export function deriveCold(
     case 'blocked':
       // Definitionally hosted: it is running tools or waiting on a person.
       return false;
+    case 'starting':
+    case 'resuming':
+    case 'adopted':
+    case 'crashed':
+    case 'running':
+      // The supervisor is bringing this session up or already hosts it. Crashed
+      // belongs here because it restarts from there rather than resting: showing
+      // it cold would invite a person to act on something already recovering.
+      return false;
     case 'done':
     case 'failed':
     case 'stopped':
