@@ -2,8 +2,8 @@
 
 Decagram Council is a **Windows-targeted Electron desktop application** for
 coordinating durable, provider-neutral Missions across Claude Code and Codex.
-It targets 64-bit Windows 10 and Windows 11 and packages as an assisted NSIS
-installer.
+It targets 64-bit Windows 10 and Windows 11 and packages x64 and arm64 payloads
+in an assisted per-user NSIS installer.
 
 Council owns the Mission ledger, isolated worktree leases, exact-commit
 handoffs, independent Test and Review gates, and user-approved fast-forward
@@ -15,29 +15,27 @@ credentials.
 
 | Surface | State |
 |---|---|
-| Integration module and parsers | Implemented; platform-neutral tests pass |
-| Trusted workspace, resolved catalog, and exact session bindings | Implemented; Windows verification pending |
+| Integration module and parsers | Implemented; Windows test suite passes |
+| Trusted workspace, resolved catalog, and exact session bindings | Implemented and exercised on Windows |
 | Provider-neutral Mission ledger and typed Missions UI | Implemented |
-| Council-owned writer and detached gate worktrees | Implemented; real Windows filesystem verification pending |
-| Codex App Server stdio client, auth status, exact thread bindings, turns, and approvals | Implemented; live macOS handshake completed; Windows verification pending |
+| Council-owned writer and detached gate worktrees | Implemented with Git for Windows/NTFS tests |
+| Codex App Server stdio client, auth status, exact thread bindings, turns, and approvals | Implemented; authenticated Windows handshake passed |
 | Exact handoffs, independent gates, and approved fast-forward integration | Implemented with real-Git and adversarial tests |
-| PowerShell hooks and runtime guards | Implemented; awaiting a real Windows execution |
+| PowerShell hooks and runtime guards | Implemented; Windows execution and self-tests pass |
 | Discovered-agent catalog UI | Implemented |
 | Snapshot-driven pixel office | Initial paged implementation |
 | Council Review pipeline | Implemented |
-| Windows launch preflight and diagnostics | Implemented |
-| x64 NSIS installer configuration | Implemented with final app ID; Windows packaging verification pending |
+| Windows launch preflight and diagnostics | Implemented, including Git Bash and supervisor version checks |
+| Windows NSIS packaging | x64 and arm64 payloads built successfully with final app ID |
 
-This checkout has not been claimed Windows-verified. The implementation/evidence distinction
-is maintained in [docs/windows-verification.md](docs/windows-verification.md), and the
-Milestone 2 outcome — decisions, commands and results, and outstanding Windows evidence — is
-recorded in
-[docs/codex-milestone-02-completion-report.md](docs/codex-milestone-02-completion-report.md).
+Current command evidence and honest limits are recorded in `WHAT-WAS-DONE.md`
+and `WHAT-NEEDS-TO-BE-DONE.md`. The older Milestone 2 report is retained as a
+historical record rather than a current parity ledger.
 
 ## Windows requirements
 
 - 64-bit Windows 10 or Windows 11
-- Claude Code 2.1.220 or newer
+- Claude Code 2.1.233 or newer
 - Codex CLI/App Server when Codex roles are used; Claude-only Missions remain
   available without it
 - PowerShell
@@ -61,7 +59,7 @@ IPC operations for:
 - explicitly waking sessions left failed after a machine restart;
 - reading recent logs and sending a plain-text PTY reply;
 - starting a Council Review through the `council-lead` main agent; and
-- reading Windows launch diagnostics;
+- reading Windows launch diagnostics and safely restarting a wedged supervisor;
 - creating and previewing a Mission squad with an explicit provider and access
   mode for every role;
 - recording exact clean-commit handoffs, running allowlisted gates, and
@@ -69,8 +67,9 @@ IPC operations for:
 - approving the exact single-use integration fingerprint through a native
   confirmation.
 
-The UI shows one card per configured or discovered agent with identity, role, state, hot/cold
-status, and pin state. Human-blocked sessions share one amber attention channel; when several need
+The UI shows one card per configured or discovered agent plus a flat background
+session roster. Session state and process liveness are separate axes: a terminal
+conversation is shown as resumable rather than dead. Human-blocked sessions share one amber attention channel; when several need
 attention, the first is shown with a count instead of creating competing alert surfaces.
 
 The default Office view recreates the supplied Ops Deck art direction with local
@@ -179,11 +178,11 @@ actions remain available.
 
 ## Development
 
-Windows is the only supported packaged target. Unpackaged development builds may
-also run on macOS so the UI and supervisor integration can be developed on the
-authoring machine; Diagnostics continues to mark that platform unsupported.
+Windows is the only supported target. An unpackaged non-Windows process is
+rejected by default; the explicit `DECAGRAM_COUNCIL_ALLOW_NON_WINDOWS_DEV=1`
+escape hatch exists only for deliberate unsupported diagnostics.
 
-Run these commands from PowerShell or a macOS terminal:
+Run these commands from PowerShell:
 
 ```powershell
 npm install
@@ -199,10 +198,9 @@ npm run pack:win
 npm run dist:win
 ```
 
-Before release, complete every required probe in
-[docs/windows-verification.md](docs/windows-verification.md). The original macOS CLI
-transcript in [docs/cli-surface.md](docs/cli-surface.md) is retained only as historical parser
-evidence; it does not qualify the Windows build.
+The current Windows CLI transcript is in
+[docs/cli-surface.md](docs/cli-surface.md). Release evidence and remaining
+external blockers are tracked in the two root status documents.
 
 ## Agent discovery and roster preferences
 
@@ -241,8 +239,8 @@ for the implemented Milestone 2 contract.
 
 ## Verified integration assumptions
 
-The implementation was originally probed against Claude Code 2.1.220. Important mismatches
-between the requested product behavior and that CLI surface are preserved:
+The implementation is currently probed against Claude Code 2.1.233 on Windows.
+Important CLI constraints are preserved:
 
 - There is no `claude reply`; direct replies use `claude attach <id>` through a PTY.
 - Some CLI failures exit zero, so anchored output envelopes are classified instead.
@@ -255,11 +253,14 @@ between the requested product behavior and that CLI surface are preserved:
 - Profile ownership is app-owned and exact: labels, agent names, and cwd are
   never used to claim a Claude session.
 
-Windows wording, locations, watcher behavior, PTY ABI compatibility, and installer behavior
-must be captured on a Windows host before release.
+Codex App Server was checked on Windows using the real executable. The stdio
+connection initialized, reported non-secret authenticated Windows state, and
+closed without deleting or archiving a thread.
 
-Codex App Server was additionally checked on the macOS development host using
-the real bundled Codex executable: the stable stdio connection initialized,
-reported non-secret authenticated state, and was closed without deleting or
-archiving a thread. That evidence validates the local protocol seam only; it is
-not Windows verification.
+## Naming policy
+
+`Decagram Council` is the product name; package names, runtime classes,
+renderer globals, configuration folders, and `DECAGRAM_COUNCIL_*` environment
+variables use that identity. `council` remains unchanged where it names the
+actual Council Review feature or its durable Git namespace (`refs/council/*`).
+Those refs are persisted data and are not a branding alias.

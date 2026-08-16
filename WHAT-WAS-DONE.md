@@ -1,151 +1,109 @@
 # What was done
 
-Work completed on 2026-08-15, after the project moved from the original macOS
-development machine to Windows. Three commits, all on `main`.
+Completion record for the Windows-only closure and the A, B, and C briefs on
+2026-08-16. The work is present only in the working tree: no commit was created
+and nothing was pushed.
 
-| Commit | Subject |
-|---|---|
-| `fc894e0` | Add CLI surface verification audit |
-| `458eeb8` | Align integration layer with Claude Code 2.1.233 |
-| `e337d33` | Close Windows verification gaps and fix two gate defects |
+## What-needs-to-be-done closure
 
-Full detail, including verbatim command output, is in `VERIFICATION.md`. This
-file is the summary.
+- Chose the conservative resume policy: Reply is available for `blocked` /
+  `input needed`, `done`, and `failed`, but never for explicitly `stopped`.
+  Terminal states are labelled "Send a reply and resume" in the UI.
+- Retained the already concrete application identity
+  `com.decagram.council`; the Windows AUMID uses the same value.
+- Upgraded the host Claude Code CLI to 2.1.233 and added
+  `C:\Users\User\.local\bin` to the persistent user PATH.
+- Verified the Codex App Server live on Windows: authenticated, Windows
+  platform metadata, version `0.148.0-alpha.9`, and a clean close.
+- Replaced the archived macOS CLI transcript and parser audit with Windows
+  2.1.233 evidence. Removed the obsolete Windows parity ledger.
+- Removed macOS Codex discovery branches, macOS daemon fixtures, POSIX fixture
+  paths, macOS provider test data, and the unpackaged non-Windows default. The
+  explicit development escape hatch remains
+  `DECAGRAM_COUNCIL_ALLOW_NON_WINDOWS_DEV=1`.
+- Clarified naming: Decagram Council is the product/runtime name; "council" is
+  retained for the actual council feature and its durable Git namespace.
+- Tightened CLI error recognition to full diagnostic lines so ordinary logs
+  containing words such as "not found" are not misclassified.
+- Made PTY Reply wait for real terminal output plus a quiet interval. A silent
+  attach times out without sending user text.
 
----
+## A — guards and correctness
 
-## 1. Audited the CLI surface against the installed reality
+- Kept one Windows PowerShell hook dialect and made every hook invocation
+  explicit: `powershell.exe -NoProfile -NonInteractive -File ...`.
+- Documented and enforced the hook contract: exit 0 allows; exit 2 blocks with
+  the reason on stderr. Unexpected guarded-child exits now fail closed as 2.
+- Preserved unconditional gate generation and the existing no-Keychain Windows
+  configuration.
+- Closed the five enforcement gaps:
+  1. guarded child failures cannot silently allow;
+  2. direct shell hooks receive explicit Builder/Test Engineer identity;
+  3. Test Engineer can edit only an existing one-line story `acceptance:` field,
+     while PRD Lead cannot edit it or replace a story wholesale;
+  4. containment follows Windows junction/reparse targets segment by segment;
+  5. inline interpreters and nested command shells cannot bypass the shell
+     construct guard.
+- Added regression coverage for every bypass, including a real junction test.
+- Kept exact durable session identity as the binding key. CWD and PID are never
+  used to choose a primary session, and process liveness remains separate from
+  session state.
 
-The integration layer was written in July 2026 against **Claude Code 2.1.220 on
-macOS**. The Windows machine was found running **2.1.143** — roughly ninety
-releases *behind*, not ahead. Every fixture in the repo carried macOS paths.
+## B — council wiring
 
-The audit established ground truth by probing the installed binary rather than
-trusting documentation, and recorded the result in `VERIFICATION.md` as a drift
-table with `CONFIRMED` / `DRIFTED` / `UNVERIFIABLE` verdicts, plus a platform
-inventory.
+- Audited all six council member definitions and the council-lead definition.
+- Kept tools in documented string form and kept each member's permissions within
+  its declared allowlist. Removed Chairman's unnecessary `permissionMode` so its
+  read-only behavior depends on its tools, not inherited mode behavior.
+- Removed stale `SHOULD route`, `SHOULD NOT route`, and `WATCH` body trailers;
+  routing signals live in distinct descriptions.
+- Required the exact final line `COUNCIL MEMBER SIGN-OFF` from every advisor.
+- Made council-lead's scope explicit: it coordinates only agents it spawns in
+  its own session, retries a failed/missing/sign-off response once, and then
+  blocks instead of silently substituting an answer.
+- Expanded council definition tests to cover descriptions, tools, trailers,
+  sign-off, and lead failure behavior.
 
-Notable finding: on 2.1.143, `claude agents --json` **did not exist at all**.
-The roster is the app's only view of live sessions, so the integration layer
-could not have functioned on that version.
+## C — Electron UI and packaging
 
-## 2. Upgraded the CLI and aligned the code to it
+- Added a flat background-session roster showing name, session state, CWD, age,
+  and a distinct process-liveness column. Missing PID is displayed as unknown,
+  never inferred as dead; terminal resumability and explicit stop are distinct.
+- Added cold-start and roster-failure empty states.
+- Expanded preflight to report PowerShell, Git Bash path, Git, Node, guard
+  self-test, PTY capability, supervisor reachability/version/workers/mismatch,
+  and raw diagnostics.
+- Added a safe supervisor-recovery IPC/action using
+  `daemon stop --any --keep-workers`. Manual PID termination is shown only when
+  the parser actually returns a PID.
+- Generated a genuine multi-resolution Windows icon and added the reproducible
+  `npm run build:icon` pipeline plus ICO structure tests.
+- Configured electron-builder for NSIS x64 and ARM64 in one per-user installer,
+  with an install-directory chooser and desktop shortcut.
+- Built both unpacked architectures and
+  `release/Decagram Council Setup 0.1.0.exe` plus its blockmap.
+- Final installer SHA-256:
+  `D644CFF1ACE7A3918D5E12B51FEDB0238BE1BE46C141A8E6E149B35062EFE5E5`.
+- Smoke-launched the packaged x64 app on Windows. With the host-only
+  `ELECTRON_RUN_AS_NODE` override removed, four package processes remained alive
+  and the window was responsive after 12 seconds; only those processes were
+  then stopped.
 
-`claude install latest` took the host from 2.1.143 to **2.1.233**. That alone
-resolved the two hardest blocking issues — the roster interface came back, and
-the host cleared the enforced minimum version.
+## Verification
 
-Re-probing 2.1.233 on Windows then found real drift that the upgrade did not fix:
+- `npx tsc --noEmit`: passed.
+- `npm test`: 45 files, 421 tests, 0 failures.
+- `npm run build:icon`: passed.
+- `npm run verify:codex-live`: passed against the real Windows Codex binary.
+- `npm run dist:win`: passed for x64 and ARM64 and produced the combined NSIS
+  installer.
+- Live Claude roster and daemon probes ran against 2.1.233. A disposable team
+  attempt reached the supervisor but model execution stopped at
+  `Login expired · Please run /login`; the disposable session was stopped and
+  removed, leaving an empty roster.
 
-- **Session states.** The CLI carries `["starting","resuming","adopted","crashed"]`
-  as its own named array, plus `running`. The code modelled five states and
-  dropped everything else to `undefined`, which the binding logic then rendered
-  as healthy. **A crashed session looked fine.** The union was widened, the
-  transitional states are treated as hosted rather than dormant, and `crashed`
-  now shows as a failure in both the card and the pixel scene.
-- **`waitingFor` gained a sixth value**, `goal proposal`. The existing
-  pass-through design meant it degraded to plain text rather than vanishing;
-  it is now a known value.
-- `MINIMUM_CLAUDE_VERSION` raised to `2.1.233`.
+## Deliberately not claimed
 
-Version claims in comments were only updated where the behaviour was actually
-re-probed. Claims that were not re-checked still say 2.1.220, because that is
-when they were last verified.
-
-## 3. Fixed two real Windows product defects
-
-Both were found by tests that had **never executed on any host** — the PowerShell
-suites were skipped on macOS for lack of an interpreter, and the Git suites had
-never met Windows path semantics.
-
-### The story gate could not fail a story
-
-Two compounding bugs in `scripts/gates/story-gate.ps1`:
-
-1. Frontmatter parsing used `.Trim('"')`, which strips a trailing quote that
-   belongs to the value. An acceptance of `node -e "process.exit(0)"` became
-   `node -e "process.exit(0)` — an unterminated string.
-2. The acceptance command was passed after `-Command`, which strips embedded
-   quotes *and* does not propagate a native exit code. `node -e "process.exit(3)"`
-   reached the child as `node -e process.exit(3)`; PowerShell parsed `(3)` as a
-   subexpression, so node evaluated a bare `process.exit` reference and exited 0.
-
-Net effect: **a failing acceptance command returned success and the gate passed
-the story.** Acceptance now runs through `-EncodedCommand` with an explicit exit,
-and only a matched pair of wrapping quotes is stripped. Verified against failing
-native commands, passing ones, and failing cmdlets.
-
-### Worktree paths never matched on Windows
-
-Git reports worktree paths with forward slashes (`C:/Users/...`) while Node
-produces backslashes (`C:\Users\...`). Every comparison against `entry.path`
-failed, so worktree reconciliation could not recognise a checkout it had just
-created. Normalised at the single choke point, `parseWorktreePorcelain`.
-
-## 4. Brought the test suite to green on Windows
-
-**`npx tsc --noEmit` clean. `npm test`: 43 files, 411 tests, 0 failures.** This is
-the first fully passing suite this repo has had on Windows.
-
-Eight tests were failing before this work. A baseline was measured by stashing, to
-prove which failures were pre-existing rather than newly introduced. Beyond the
-two product defects above, the remaining fixes were test-side:
-
-- `test/board.test.ts` compared POSIX literals against paths that
-  `claudeConfigDir` correctly resolves to a drive-qualified form.
-- Git fixture repos now pin `core.autocrlf=false`; Git for Windows sets it true
-  system-wide, so fixture content round-tripped as CRLF.
-- The PowerShell guard timeout was raised — five real PowerShell processes cannot
-  finish inside Vitest's 5s default.
-
-## 5. Verified the live surface against a real supervisor
-
-A `--bg --exec` shell job was dispatched, observed, stopped and removed. It spends
-no model quota but exercises the same dispatch, roster, logs, stop and rm paths a
-real session uses. It confirmed the `state.json` shape, the short-id invariant,
-`unknown-session` classification on a bogus id, and the dispatch output format,
-and left nothing behind.
-
-A second job was held open to capture the running supervisor:
-
-- **Supervisor version 2.1.233 matches the CLI version** — the mismatch the audit
-  was asked to check for does not exist here.
-- A background session in state `working` reports **no `pid`**, confirming on
-  Windows the exact reasoning `deriveCold` was built on.
-
-Both Windows daemon-status shapes are now committed fixtures with parser tests.
-The running form carries a trailing "holding this daemon open" block that the
-macOS transcript does not.
-
-## 6. Made supervisor recovery reachable
-
-`daemonStop()` existed but had no caller anywhere in `src/`. It now parses its
-result into a typed `DaemonStopOutcome` and is reachable as
-`npm run harness daemon-stop`. Both real outcomes were observed and are tested:
-`stopped` and `no daemon running`, both exiting 0.
-
-## 7. Housekeeping
-
-- Deleted `README 2.md`, a stale duplicate committed once in `e95104a` that still
-  described a macOS/Windows product with a bash forwarder and an unbuilt UI.
-- Installed `node_modules` (335 packages). It was absent, so nothing could be
-  typechecked or tested. Gitignored, not committed.
-
----
-
-## Honest limits of this work
-
-Three things could not be verified and were **not** guessed at:
-
-1. **The wedged-supervisor `daemon stop` message.** Both healthy outcomes were
-   observed, but a supervisor that stops answering could not be produced on
-   demand. The `taskkill` pid extraction is deliberately loose, tested only
-   against synthetic input, and labelled as uncaptured in both the code comment
-   and `VERIFICATION.md`. Do not treat that pattern as verified.
-2. **Team and task file shapes** — no team has ever been created on this host.
-3. **Whether cross-session messaging is macOS/Linux only** — no platform gate was
-   found for it in the binary, but proving the behaviour needs two concurrent
-   sessions.
-
-One product decision was deliberately left open rather than made unilaterally:
-reply is still gated on `blocked` + `input needed`. See `WHAT-NEEDS-TO-BE-DONE.md`.
+The remaining checks in `WHAT-NEEDS-TO-BE-DONE.md` require a refreshed Claude
+login, a naturally wedged supervisor, or human visual/installer interaction.
+They are not represented as verified.

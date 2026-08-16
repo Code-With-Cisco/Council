@@ -1,24 +1,14 @@
-# Windows parser and path audit
+# Windows parser evidence
 
-Date: 2026-07-26
+Current as of 2026-08-16 against Claude Code 2.1.233 on Windows.
 
-The repository's original fixtures came from Claude Code 2.1.220 on macOS.
-Decagram Council is now Windows-only, so macOS prose is retained only as a
-regression fixture. It is not evidence of the Windows shape.
-
-| Surface | Assessment | Windows handling |
+| Surface | Evidence | Parser behavior |
 |---|---|---|
-| `agents --json --all` roster fields | likely platform-neutral, unverified | Optional-field parser; interactive rows remain non-actionable |
-| `backgrounded · <id> · <name>` acknowledgement | likely platform-neutral, unverified | Line-oriented parser; malformed output becomes `CliFailure` |
-| job `state.json` | location/content unverified | All fields optional; read best-effort |
-| daemon status header (`pid`, `version`, `uptime`) | likely neutral, unverified | Parsed only when recognized |
-| daemon transport details | macOS-shaped | `sock dir` and `control.sock` are optional; an unknown Windows form sets `recognized: false` |
-| `logs` unknown-session envelope | wording unverified | Only anchored `No job matching` is classified |
-| `logs` daemon envelope | wording unverified | Only anchored `Couldn't read logs for <id>` is classified; agent terminal text is otherwise success |
-| config/job/team paths | platform-neutral implementation | Every path is built with `node:path`; no hardcoded separator |
-| hook `file_path` | Windows-specific | PowerShell guard normalizes slash direction, repeated separators, casing, worktree prefixes, and project membership |
-| CLI discovery | Windows-specific | Probes `claude.exe`, `%USERPROFILE%` extension roots, `%LOCALAPPDATA%`, and known install directories |
-
-Until the Windows probe supplies exact fixtures, unrecognized daemon prose is
-rendered as **Unknown** with the raw text available in diagnostics. No parser
-guesses a named-pipe string.
+| `agents --json --all` | Live empty-roster probe plus captured Windows background fixtures | Optional fields; background identity uses `id`, then `sessionId`; cwd is never ownership identity |
+| Dispatch acknowledgement | Live `backgrounded · <id> · <name>` probe | Anchored one-line parser; malformed output fails |
+| Job `state.json` | Captured Windows-shaped fixture | Every undocumented field remains optional |
+| Daemon running/resting | Live cold probe and captured running Windows named-pipe fixture | State, version, worker count, reachability, and raw text retained |
+| CLI failures | Live bogus-id evidence and regression tests | Only anchored diagnostic envelopes classify; ordinary logs remain success |
+| Daemon stop | Both healthy Windows outcomes captured | Unrecognized/wedged prose is retained; a mentioned PID is surfaced defensively |
+| Team config | Existing Windows config field names inspected | Members parse `name`, `agentId`, and optional `agentType` |
+| Task files | Blocked by expired Claude login | Best-effort parser stays forward-compatible; no shape is claimed |

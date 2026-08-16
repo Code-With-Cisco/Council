@@ -1,5 +1,10 @@
 # Milestone 2 completion report: provider-neutral missions
 
+> Historical snapshot from 2026-07-26. Its macOS host, pending-Windows, and
+> renderer-path statements describe that milestone only. Current Windows
+> evidence and the intentionally exposed Git Bash diagnostic path are recorded
+> in the root status documents and `README.md`.
+
 **Brief:** [`codex-milestone-02-provider-neutral-missions.md`](codex-milestone-02-provider-neutral-missions.md)
 **Report date:** 2026-07-26
 **Development host:** macOS (Darwin 25.5.0), Node 20.11+, no PowerShell interpreter
@@ -159,7 +164,8 @@ account for 25 files (6,408 insertions).
 `src/ui/renderer/{index.html,renderer.js,styles.css,pixel-office.js,scene-view-model.js}`,
 `src/supervisor/{agentSupervisor,launchCoordinator,sessionBindings,index}.ts`,
 `src/integration/{index,runtime,types}.ts`, `README.md`,
-`docs/windows-verification.md`, `package.json`, `.gitignore`
+the historical Windows verification ledger (removed after closure),
+`package.json`, `.gitignore`
 
 ### Added — tests
 
@@ -196,7 +202,7 @@ account for 25 files (6,408 insertions).
 ## 6. Remaining platform evidence
 
 Windows evidence is **entirely outstanding**. The authoritative ledger is
-[`windows-verification.md`](windows-verification.md); its 18-item release probe
+the former Windows verification ledger; its 18-item release probe
 is the gate for calling any build Windows-verified. The mission-specific items
 still unperformed:
 

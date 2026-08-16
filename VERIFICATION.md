@@ -1,5 +1,10 @@
 # Verification
 
+> Historical record: this report covers the 2026-08-15 migration pass. Current
+> completion evidence and remaining external blockers are recorded in
+> `WHAT-WAS-DONE.md` and `WHAT-NEEDS-TO-BE-DONE.md`. The former Windows parity
+> ledger was removed after the Windows-only closure work on 2026-08-16.
+
 Audit of this repository's assumptions about the Claude Code CLI surface against
 the installed reality on the current Windows host.
 
