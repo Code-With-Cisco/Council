@@ -16,6 +16,10 @@ const channels = {
   recoverSupervisor: 'dc:recover-supervisor',
   refreshDiagnostics: 'dc:refresh-diagnostics',
   installAgentPack: 'dc:install-agent-pack',
+  getUpdateState: 'dc:update:get-state',
+  checkForUpdates: 'dc:update:check',
+  downloadUpdate: 'dc:update:download',
+  installUpdate: 'dc:update:install',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -33,6 +37,7 @@ const channels = {
   missionState: 'dc:mission:state',
   snapshot: 'dc:snapshot',
   state: 'dc:state',
+  updateState: 'dc:update:state',
 };
 
 contextBridge.exposeInMainWorld('decagramCouncil', {
@@ -65,6 +70,10 @@ contextBridge.exposeInMainWorld('decagramCouncil', {
   recoverSupervisor: () => ipcRenderer.invoke(channels.recoverSupervisor),
   refreshDiagnostics: () => ipcRenderer.invoke(channels.refreshDiagnostics),
   installAgentPack: () => ipcRenderer.invoke(channels.installAgentPack),
+  getUpdateState: () => ipcRenderer.invoke(channels.getUpdateState),
+  checkForUpdates: () => ipcRenderer.invoke(channels.checkForUpdates),
+  downloadUpdate: () => ipcRenderer.invoke(channels.downloadUpdate),
+  installUpdate: () => ipcRenderer.invoke(channels.installUpdate),
   logs: (profileId) => ipcRenderer.invoke(channels.logs, profileId),
   reply: (profileId, message) => ipcRenderer.invoke(channels.reply, profileId, message),
   council: (question, expectedDefinitionFingerprint) =>
@@ -104,5 +113,10 @@ contextBridge.exposeInMainWorld('decagramCouncil', {
     const handler = (_event, state) => listener(state);
     ipcRenderer.on(channels.missionState, handler);
     return () => ipcRenderer.removeListener(channels.missionState, handler);
+  },
+  onUpdateState: (listener) => {
+    const handler = (_event, state) => listener(state);
+    ipcRenderer.on(channels.updateState, handler);
+    return () => ipcRenderer.removeListener(channels.updateState, handler);
   },
 });

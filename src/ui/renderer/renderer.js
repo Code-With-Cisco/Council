@@ -48,6 +48,7 @@ let pendingGateTarget;
 let councilProjection;
 let councilPollTimer;
 let councilPollInFlight = false;
+let updateState;
 const missionRoleSelections = new Map();
 
 const byId = (id) => document.getElementById(id);
@@ -157,6 +158,61 @@ function failureSummary(result, fallback = 'Action could not be completed.') {
     result.recommendedAction,
     result.correlationId ? `Reference: ${result.correlationId}` : undefined,
   ].filter(Boolean).join(' ');
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${(value / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function renderUpdate() {
+  if (!updateState) return;
+  byId('update-current-version').textContent = updateState.currentVersion;
+  byId('update-available-version').textContent = updateState.availableVersion ?? 'Not available';
+  byId('update-release-date').textContent = updateState.releaseDate
+    ? humanDate(updateState.releaseDate)
+    : 'Unknown';
+  byId('update-checked-at').textContent = updateState.checkedAt
+    ? humanDate(updateState.checkedAt)
+    : 'Never';
+  byId('update-message').textContent = updateState.message;
+  const progress = byId('update-progress');
+  const progressLabel = byId('update-progress-label');
+  const isProgress = updateState.status === 'downloading' || updateState.status === 'downloaded';
+  progress.hidden = !isProgress;
+  progressLabel.hidden = !isProgress;
+  progress.value = updateState.progress?.percent ?? 0;
+  progressLabel.textContent = updateState.progress
+    ? `${Math.round(updateState.progress.percent)}% · ${formatBytes(updateState.progress.transferred)} of ${formatBytes(updateState.progress.total)}`
+    : 'Preparing download…';
+  const checking = updateState.status === 'checking';
+  const downloading = updateState.status === 'downloading';
+  const unsupported = updateState.status === 'unsupported';
+  byId('update-check-again-button').disabled = checking || downloading || unsupported;
+  byId('update-check-again-button').textContent = checking ? 'Checking…' : 'Check again';
+  byId('update-download-button').hidden = updateState.status !== 'available';
+  byId('update-install-button').hidden = updateState.status !== 'downloaded';
+  const header = byId('check-update-button');
+  header.disabled = checking || downloading;
+  header.textContent = updateState.status === 'available'
+    ? `Update ${updateState.availableVersion}`
+    : updateState.status === 'downloading'
+      ? `Downloading ${Math.round(updateState.progress?.percent ?? 0)}%`
+      : updateState.status === 'downloaded'
+        ? 'Restart to update'
+        : checking
+          ? 'Checking…'
+          : 'Check for updates';
+}
+
+async function checkForApplicationUpdate(button) {
+  const result = await runAction(button, 'Checking…', () => api.checkForUpdates());
+  if (result?.ok) {
+    updateState = result.value;
+    renderUpdate();
+  }
 }
 
 async function runAction(button, pendingText, action) {
@@ -1874,6 +1930,44 @@ for (const tab of document.querySelectorAll('.tab')) {
   });
 }
 
+byId('check-update-button').addEventListener('click', async (event) => {
+  const panel = byId('update-panel');
+  panel.hidden = false;
+  renderUpdate();
+  if (
+    updateState?.status === 'idle' ||
+    updateState?.status === 'not-available' ||
+    updateState?.status === 'error'
+  ) {
+    await checkForApplicationUpdate(event.currentTarget);
+  }
+  byId('close-update-button').focus();
+});
+
+byId('close-update-button').addEventListener('click', () => {
+  byId('update-panel').hidden = true;
+  byId('check-update-button').focus();
+});
+
+byId('update-check-again-button').addEventListener('click', async (event) => {
+  await checkForApplicationUpdate(event.currentTarget);
+});
+
+byId('update-download-button').addEventListener('click', async (event) => {
+  const result = await runAction(event.currentTarget, 'Downloading…', () => api.downloadUpdate());
+  if (result?.ok) {
+    updateState = result.value;
+    renderUpdate();
+  }
+});
+
+byId('update-install-button').addEventListener('click', async (event) => {
+  const result = await runAction(event.currentTarget, 'Restarting…', () => api.installUpdate());
+  if (result?.ok) {
+    byId('update-message').textContent = 'Closing safely before installing the update…';
+  }
+});
+
 byId('workspace-switcher').addEventListener('change', async (event) => {
   const switcher = event.currentTarget;
   const targetId = switcher.value;
@@ -2181,6 +2275,12 @@ byId('office-next').addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !byId('update-panel').hidden) {
+    event.preventDefault();
+    byId('update-panel').hidden = true;
+    byId('check-update-button').focus();
+    return;
+  }
   const target = event.target;
   const tagName = target?.tagName ?? '';
   if (
@@ -2265,9 +2365,15 @@ api.onMissionState((nextMissionState) => {
   render();
 });
 
-Promise.all([api.getState(), api.getMissionState()])
-  .then(([initial, initialMissionResult]) => {
+api.onUpdateState((nextUpdateState) => {
+  updateState = nextUpdateState;
+  renderUpdate();
+});
+
+Promise.all([api.getState(), api.getMissionState(), api.getUpdateState()])
+  .then(([initial, initialMissionResult, initialUpdateState]) => {
     state = initial;
+    updateState = initialUpdateState;
     missionState = initialMissionResult.ok
       ? initialMissionResult.value
       : {
@@ -2280,6 +2386,7 @@ Promise.all([api.getState(), api.getMissionState()])
           projection: undefined,
         };
     byId('council-project').textContent = initial.projectDir ?? 'No workspace';
+    renderUpdate();
     render();
   })
   .catch((error) => {

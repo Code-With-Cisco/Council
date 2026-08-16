@@ -161,3 +161,45 @@ pushed.
   reported `vscode-extension`, and parsed version `0.148.0-alpha.9`.
 - No installed-app interaction, live agent launch, live Mission, or live Codex
   connection is claimed by this automated pass.
+
+## In-app Windows updates
+
+Implemented in the uncommitted working tree on 2026-08-16:
+
+- Added a manual installed-app update state machine using the NSIS-compatible
+  `electron-updater`. Automatic downloads and silent install-on-quit are off.
+- Added a header **Check for updates** action and an accessible update panel
+  showing installed/available versions, last check time, safe errors, bounded
+  download progress, Download, and Install and relaunch controls.
+- Kept update actions behind typed, trusted IPC. Raw network/updater errors do
+  not cross into the renderer.
+- Integrated update installation with the existing serialized shutdown. The
+  app drains watchers, worktree/runtime operations, and Codex before invoking
+  the NSIS installer; downloaded updates are not installed during an ordinary
+  quit.
+- Configured GitHub Releases for `Code-With-Cisco/Council` and added a tag-only
+  Windows workflow. A matching `vX.Y.Z` tag creates a draft release; a human
+  must verify its installer, blockmap, and `latest.yml` before publication.
+- Bumped the updater-enabled build to 0.2.0. The already-installed 0.1.0 needs
+  one manual in-place installer upgrade because it cannot execute code added in
+  0.2.0; later versions can update from inside the app.
+- Added [docs/updates.md](docs/updates.md) with the release and signing process.
+- Overrode the updater/build tree to patched `js-yaml` 4.3.1 or newer after the
+  production audit identified CVE-2026-59870 in 4.3.0.
+
+### Updater verification
+
+- `npx tsc --noEmit`: passed.
+- `npm test`: 49 files, 435 tests, 0 failures.
+- `npm run build`: passed.
+- x64 NSIS build: passed and produced the installer, blockmap, `latest.yml`, and
+  packaged `resources/app-update.yml` for the expected GitHub repository.
+- Bootstrap installer: `release/Decagram Council Setup 0.2.0.exe`; SHA-256
+  `E94522A8440B2FA5E4B95036E7B9666FB411133684EF1AEFA964D5C4B3B3EB5E`.
+- `npm audit --omit=dev`: 0 production vulnerabilities.
+- An unauthenticated GitHub API probe confirmed `Code-With-Cisco/Council` is
+  public. The latest-release endpoint currently returns 404 because no release
+  has been published yet; no access token is embedded in the application.
+- A true end-to-end update remains unclaimed until two signed versions are
+  published and an older installed version downloads, installs, and relaunches
+  into the newer version.

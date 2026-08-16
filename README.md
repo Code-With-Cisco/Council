@@ -198,6 +198,11 @@ npm run pack:win
 npm run dist:win
 ```
 
+Installed builds expose a manual **Check for updates** flow backed by published
+GitHub Releases. Tagged release builds create a draft for review; see
+[docs/updates.md](docs/updates.md) for versioning, required artifacts, signing,
+and publication instructions.
+
 The current Windows CLI transcript is in
 [docs/cli-surface.md](docs/cli-surface.md). Release evidence and remaining
 external blockers are tracked in the two root status documents.

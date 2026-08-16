@@ -19,10 +19,42 @@
           <select id="workspace-switcher" aria-label="Saved office"></select>
           <span id="workspace-label" class="mono-label">No workspace</span>
           <button id="change-workspace-button" class="button" type="button">Choose workspace</button>
+          <button id="check-update-button" class="button" type="button">Check for updates</button>
           <span id="connection-state" class="connection-pill">Starting…</span>
           <button id="wake-button" class="button button-accent" hidden>Wake the squad</button>
         </div>
       </header>
+
+      <section id="update-panel" class="update-panel" role="dialog"
+        aria-labelledby="update-title" hidden>
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">APPLICATION UPDATE</p>
+            <h2 id="update-title">Decagram Council</h2>
+          </div>
+          <button id="close-update-button" class="button button-compact" type="button"
+            aria-label="Close update panel">Close</button>
+        </div>
+        <p id="update-message" role="status">Update status is loading.</p>
+        <dl class="detail-meta">
+          <dt>Installed</dt><dd id="update-current-version">Unknown</dd>
+          <dt>Available</dt><dd id="update-available-version">Not checked</dd>
+          <dt>Released</dt><dd id="update-release-date">Unknown</dd>
+          <dt>Last checked</dt><dd id="update-checked-at">Never</dd>
+        </dl>
+        <progress id="update-progress" max="100" value="0"
+          aria-label="Update download progress" hidden></progress>
+        <p id="update-progress-label" class="muted" hidden></p>
+        <div class="card-actions">
+          <button id="update-check-again-button" class="button" type="button">Check again</button>
+          <button id="update-download-button" class="button button-primary" type="button" hidden>
+            Download update
+          </button>
+          <button id="update-install-button" class="button button-primary" type="button" hidden>
+            Install and relaunch
+          </button>
+        </div>
+      </section>
 
       <section id="workspace-setup" class="workspace-setup" hidden>
         <p class="eyebrow">WORKSPACE SETUP</p>

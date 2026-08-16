@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CliResult } from '../integration/types.js';
 import type { AgentSupervisorPort } from '../supervisor/contracts.js';
 import type { MissionUiController } from './missionUi.js';
+import type { AppUpdateState } from './appUpdater.js';
 import { sanitizeTerminalOutput } from './logOutput.js';
 import {
   IPC_CHANNELS,
@@ -47,6 +48,10 @@ export interface CouncilIpcDependencies {
     readonly merged: number;
     readonly unchanged: number;
   }>>) | undefined;
+  readonly getUpdateState?: (() => AppUpdateState) | undefined;
+  readonly checkForUpdates?: (() => Promise<UiResult<AppUpdateState>>) | undefined;
+  readonly downloadUpdate?: (() => Promise<UiResult<AppUpdateState>>) | undefined;
+  readonly installUpdate?: (() => Promise<UiResult<'restarting'>>) | undefined;
   /** True only while the current definition projection is authoritative. */
   readonly canLaunchDefinitions: () => boolean;
   readonly confirmStartNew: () => Promise<boolean>;
@@ -302,6 +307,28 @@ export function registerCouncilIpc(
   registrar.handle(IPC_CHANNELS.installAgentPack, async (event) => {
     if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
     return dependencies.installAgentPack?.() ?? unavailable('Agent Pack installation is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.getUpdateState, (event) => {
+    if (!dependencies.isTrusted(event)) throw new Error('Untrusted IPC sender');
+    const state = dependencies.getUpdateState?.();
+    if (state === undefined) throw new Error('Application updater is unavailable');
+    return state;
+  });
+
+  registrar.handle(IPC_CHANNELS.checkForUpdates, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.checkForUpdates?.() ?? unavailable('Application updater is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.downloadUpdate, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.downloadUpdate?.() ?? unavailable('Application updater is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.installUpdate, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.installUpdate?.() ?? unavailable('Application updater is unavailable.');
   });
 
   registrar.handle(IPC_CHANNELS.logs, async (event, rawProfileId) => {

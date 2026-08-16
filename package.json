@@ -1,7 +1,7 @@
 {
   "name": "decagram-council",
   "productName": "Decagram Council",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Windows mission control for Claude Code and Codex agents",
   "main": "dist/src/ui/main.js",
@@ -21,14 +21,19 @@
     "start": "npm run build && electron .",
     "pack:win": "npm run build && electron-builder --win dir",
     "dist:win": "npm run build && electron-builder --win",
+    "release:win": "npm run build && electron-builder --win --publish always",
     "build:icon": "powershell.exe -NoProfile -NonInteractive -File scripts/build-icon.ps1"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
+    "electron-updater": "^6.8.9",
     "yaml": "^2.7.0"
   },
   "optionalDependencies": {
     "node-pty": "^1.0.0"
+  },
+  "overrides": {
+    "js-yaml": "^4.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -54,6 +59,12 @@
     ],
     "directories": {
       "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Code-With-Cisco",
+      "repo": "Council",
+      "releaseType": "draft"
     },
     "win": {
       "target": [

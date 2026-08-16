@@ -19,10 +19,13 @@ Implemented in the uncommitted working tree on 2026-08-16:
 - conflict-safe Repository Agent Pack preview/install with a versioned manifest;
 - saved single-runtime Office switching by workspace ID; and
 - packaged Codex discovery in current VS Code and VS Code Insiders extension
-  layouts for x64 and ARM64.
+  layouts for x64 and ARM64; and
+- manual in-app Windows update check, download progress, confirmed install, and
+  orderly relaunch, plus a tag-only draft GitHub Release workflow.
 
-Automated verification is green (`npx tsc --noEmit`, 48 test files / 431 tests,
-build, and x64 unpacked packaging). The following work remains and must not be
+Automated verification is green (`npx tsc --noEmit`, 49 test files / 435 tests,
+build, x64 NSIS packaging, and a clean production dependency audit). The
+following work remains and must not be
 treated as verified or complete:
 
 - run the installed-app matrix in Phase 4, especially live output, direct chat,
@@ -35,6 +38,12 @@ treated as verified or complete:
 - add Mission abandoned-draft reset and validate live retry behavior;
 - add per-workspace UI preference restoration and inactive-office activity
   summaries; and
+- configure consistent Authenticode signing, publish two incrementing test
+  versions, and perform an installed-app update/download/install/relaunch test;
+  and
+- manually install the updater-enabled 0.2.0 build over the existing 0.1.0
+  installation once; 0.1.0 cannot self-bootstrap functionality it does not
+  contain; and
 - keep concurrent windows blocked until every IPC request carries and validates
   an exact workspace ID and runtime-registry isolation tests pass.
 

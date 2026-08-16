@@ -23,6 +23,20 @@ describe('Windows Electron shell', () => {
     expect((build['nsis'] as Record<string, unknown>)['perMachine']).toBe(false);
     expect(build['mac']).toBeUndefined();
     expect(build['linux']).toBeUndefined();
+    expect(build['publish']).toEqual({
+      provider: 'github',
+      owner: 'Code-With-Cisco',
+      repo: 'Council',
+      releaseType: 'draft',
+    });
+    const workflow = await readFile(
+      path.join(REPO_ROOT, '.github', 'workflows', 'release-windows.yml'),
+      'utf8',
+    );
+    expect(workflow).toContain("tags:\n      - 'v*'");
+    expect(workflow).toContain('contents: write');
+    expect(workflow).toContain('npm run release:win');
+    expect(workflow).toContain('GH_TOKEN: ${{ github.token }}');
   });
 
   it('keeps renderer privileges isolated behind a sandboxed preload bridge', async () => {
@@ -76,6 +90,10 @@ describe('Windows Electron shell', () => {
     expect(preload).toContain('chooseWorkspace: ()');
     expect(preload).toContain('activateWorkspace: (workspaceId)');
     expect(preload).toContain('installAgentPack: ()');
+    expect(preload).toContain('checkForUpdates: ()');
+    expect(preload).toContain('downloadUpdate: ()');
+    expect(preload).toContain('installUpdate: ()');
+    expect(preload).toContain('onUpdateState: (listener)');
     expect(preload).toContain('startMemberWithMessage: (profileId, expectedDefinitionFingerprint, message)');
     expect(preload).toContain(
       'startNewMember: (profileId, expectedDefinitionFingerprint)',
@@ -123,6 +141,8 @@ describe('Windows Electron shell', () => {
     expect(html).toContain('src="./pixel-office.js"');
     expect(html).toContain('src="./scene-view-model.js"');
     expect(html).toContain('id="council-session"');
+    expect(html).toContain('id="check-update-button"');
+    expect(html).toContain('id="update-progress"');
     expect(html).toContain('id="view-missions"');
     expect(html).toContain('id="mission-role-options"');
     expect(html).toContain('id="squad-preview"');
@@ -152,6 +172,9 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('Start with message');
     expect(renderer).toContain('api.activateWorkspace(targetId)');
     expect(renderer).toContain('api.installAgentPack()');
+    expect(renderer).toContain('api.checkForUpdates()');
+    expect(renderer).toContain('api.downloadUpdate()');
+    expect(renderer).toContain('api.installUpdate()');
     expect(
       renderer.match(
         /DecagramCouncilSceneViewModel\.invokeProfileStart\(slot, profileActions\)/g,

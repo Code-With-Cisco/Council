@@ -13,6 +13,7 @@ import { mkdir, readFile, realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { watch, type FSWatcher } from 'chokidar';
+import electronUpdater from 'electron-updater';
 import {
   AppConfigStore,
   validateWorkspaceDirectory,
@@ -73,6 +74,11 @@ import {
 import { registerCouncilIpc } from './ipcHandlers.js';
 import { DiagnosticJournal } from './diagnosticJournal.js';
 import { AgentPackInstaller } from './agentPack.js';
+import {
+  AppUpdateController,
+  type AppUpdaterPort,
+  type AppUpdateState,
+} from './appUpdater.js';
 import type { MissionUiController } from './missionUi.js';
 import { PrivilegedMissionUiController } from './missionController.js';
 import {
@@ -99,6 +105,7 @@ let bindingWatcher: FSWatcher | undefined;
 let applicationConfigWatcher: FSWatcher | undefined;
 let currentState: UiState | undefined;
 let shutdownStarted = false;
+let updateInstallRequested = false;
 let activationGeneration = 0;
 const applicationLifecycle = new SerializedLifecycle();
 let catalogRefresh: Promise<void> = Promise.resolve();
@@ -111,6 +118,7 @@ let missionLedgerStore: MissionLedgerStore;
 let worktreeLeaseStore: WorktreeLeaseStore;
 let claudePaths: ClaudePaths;
 let diagnosticJournal: DiagnosticJournal;
+let appUpdateController: AppUpdateController;
 let profileStore: RosterConfigStore | undefined;
 let savedRoster: RosterConfigStoreLoad | undefined;
 let supervisorActionsReady = false;
@@ -418,6 +426,11 @@ function publishMissionState(state: Awaited<ReturnType<MissionUiController['getS
   mainWindow.webContents.send(IPC_CHANNELS.missionState, state);
 }
 
+function publishUpdateState(state: AppUpdateState): void {
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(IPC_CHANNELS.updateState, state);
+}
+
 function markRuntimeStale(
   source: 'binding' | 'catalog' | 'profile',
   message: string,
@@ -601,6 +614,44 @@ function registerIpc(): void {
         } catch (error) {
           return unavailable(`Agent Pack installation failed: ${error instanceof Error ? error.message : String(error)}`);
         }
+      },
+      getUpdateState: () => appUpdateController.state,
+      checkForUpdates: async () => {
+        const state = await appUpdateController.check();
+        return state.status === 'unsupported'
+          ? unavailable(state.message)
+          : { ok: true, value: state };
+      },
+      downloadUpdate: async () => {
+        if (appUpdateController.state.status !== 'available') {
+          return unavailable('Check for an available update before downloading.');
+        }
+        const state = await appUpdateController.download();
+        return state.status === 'error'
+          ? unavailable(state.message)
+          : { ok: true, value: state };
+      },
+      installUpdate: async () => {
+        if (!appUpdateController.installReady) {
+          return unavailable('No downloaded update is ready to install.');
+        }
+        const confirmation = await dialog.showMessageBox(mainWindow!, {
+          type: 'question',
+          title: 'Install update and relaunch?',
+          message: `Install Decagram Council ${appUpdateController.state.availableVersion ?? 'update'} now?`,
+          detail:
+            'Council will close cleanly, install the downloaded update, and relaunch. Provider sessions are not deleted.',
+          buttons: ['Install and relaunch', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (confirmation.response !== 0) {
+          return unavailable('Update installation was canceled.');
+        }
+        updateInstallRequested = true;
+        setTimeout(() => app.quit(), 100).unref();
+        return { ok: true, value: 'restarting' as const };
       },
       canLaunchDefinitions: () =>
         currentState?.capabilities.start === true &&
@@ -1609,6 +1660,16 @@ async function initializeApp(context: SerializedLifecycleContext): Promise<void>
   app.setAppUserModelId(APP_ID);
   Menu.setApplicationMenu(null);
 
+  const updater = app.isPackaged
+    ? (electronUpdater.autoUpdater as unknown as AppUpdaterPort)
+    : undefined;
+  appUpdateController = new AppUpdateController({
+    updater,
+    currentVersion: app.getVersion(),
+    enabled: app.isPackaged && process.platform === 'win32',
+    onState: publishUpdateState,
+  });
+
   const userData = app.getPath('userData');
   appConfigStore = new AppConfigStore(userData);
   bindingStore = new SessionBindingStore(path.join(userData, 'session-bindings.json'));
@@ -1957,5 +2018,15 @@ app.on('before-quit', (event) => {
     .catch((error) => {
       console.error(error);
     })
-    .finally(() => app.quit());
+    .finally(() => {
+      if (updateInstallRequested) {
+        try {
+          appUpdateController.quitAndInstall();
+          return;
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      app.quit();
+    });
 });

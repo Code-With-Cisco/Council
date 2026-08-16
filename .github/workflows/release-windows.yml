@@ -1,0 +1,37 @@
+name: Release Windows update
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Require tag to match package version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ('${{ github.ref_name }}' -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match package version $version."
+          }
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Build and upload draft GitHub release
+        run: npm run release:win
+        env:
+          GH_TOKEN: ${{ github.token }}

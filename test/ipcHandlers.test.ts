@@ -191,6 +191,18 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
       ? { ok: true, value: result.value }
       : { ok: false, message: result.message, details: result.raw };
   const recordDiagnostic = vi.fn(async () => undefined);
+  const updateState = {
+    status: 'idle' as const,
+    currentVersion: '0.1.0',
+    availableVersion: undefined,
+    checkedAt: undefined,
+    releaseDate: undefined,
+    progress: undefined,
+    message: 'Ready to check for updates.',
+  };
+  const checkForUpdates = vi.fn(async () => ({ ok: true as const, value: updateState }));
+  const downloadUpdate = vi.fn(async () => ({ ok: true as const, value: updateState }));
+  const installUpdate = vi.fn(async () => ({ ok: true as const, value: 'restarting' as const }));
   const dependencies: CouncilIpcDependencies = {
     isTrusted: () => trusted,
     getState: () => undefined,
@@ -207,6 +219,10 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
         raw: 'stopped',
       },
     }),
+    getUpdateState: () => updateState,
+    checkForUpdates,
+    downloadUpdate,
+    installUpdate,
     canLaunchDefinitions: () => true,
     confirmStartNew,
     confirmStartSquad,
@@ -230,6 +246,9 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     confirmMissionIntegration,
     missionController,
     recordDiagnostic,
+    checkForUpdates,
+    downloadUpdate,
+    installUpdate,
   };
 }
 
@@ -272,6 +291,17 @@ describe('typed privileged IPC handlers', () => {
       'profile-12345678',
       'ordinary text',
     );
+  });
+
+  it('routes manual update steps through dedicated privileged handlers', async () => {
+    const f = fixture();
+    expect(await f.invoke(IPC_CHANNELS.getUpdateState)).toMatchObject({ status: 'idle' });
+    await f.invoke(IPC_CHANNELS.checkForUpdates);
+    await f.invoke(IPC_CHANNELS.downloadUpdate);
+    await f.invoke(IPC_CHANNELS.installUpdate);
+    expect(f.checkForUpdates).toHaveBeenCalledOnce();
+    expect(f.downloadUpdate).toHaveBeenCalledOnce();
+    expect(f.installUpdate).toHaveBeenCalledOnce();
   });
 
   it('starts an individual agent with a bounded multiline message', async () => {

@@ -5,6 +5,7 @@ import type { Snapshot } from '../integration/runtime.js';
 import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
 import type { ResolvedAgentCatalog } from '../supervisor/catalog.js';
 import type { SessionBindingStoreProblem } from '../supervisor/sessionBindings.js';
+import type { AppUpdateState } from './appUpdater.js';
 import type {
   UiCreateMissionInput,
   UiCreateMissionResult,
@@ -39,6 +40,10 @@ export const IPC_CHANNELS = {
   recoverSupervisor: 'dc:recover-supervisor',
   refreshDiagnostics: 'dc:refresh-diagnostics',
   installAgentPack: 'dc:install-agent-pack',
+  getUpdateState: 'dc:update:get-state',
+  checkForUpdates: 'dc:update:check',
+  downloadUpdate: 'dc:update:download',
+  installUpdate: 'dc:update:install',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -56,6 +61,7 @@ export const IPC_CHANNELS = {
   missionState: 'dc:mission:state',
   snapshot: 'dc:snapshot',
   state: 'dc:state',
+  updateState: 'dc:update:state',
 } as const;
 
 export interface UiWorkspaceState {
@@ -196,6 +202,10 @@ export interface DecagramCouncilApi {
     readonly merged: number;
     readonly unchanged: number;
   }>>;
+  getUpdateState(): Promise<AppUpdateState>;
+  checkForUpdates(): Promise<UiResult<AppUpdateState>>;
+  downloadUpdate(): Promise<UiResult<AppUpdateState>>;
+  installUpdate(): Promise<UiResult<'restarting'>>;
   logs(profileId: string): Promise<UiResult<string>>;
   reply(profileId: string, message: string): Promise<UiResult<ReplyOutcome>>;
   council(
@@ -232,4 +242,5 @@ export interface DecagramCouncilApi {
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   onState(listener: (state: UiState) => void): () => void;
   onMissionState(listener: (state: UiMissionState) => void): () => void;
+  onUpdateState(listener: (state: AppUpdateState) => void): () => void;
 }
