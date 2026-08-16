@@ -34,6 +34,9 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
   const startNewMember = vi.fn(async () =>
     success({ id: 'new00001', name: 'dc-new', unknownAgent: undefined }),
   );
+  const startMemberWithMessage = vi.fn(async () =>
+    success({ id: 'message1', name: 'dc-message', unknownAgent: undefined }),
+  );
   const startCouncilReview = vi.fn(async () =>
     success({ id: 'council1', name: 'dc-council', unknownAgent: undefined }),
   );
@@ -176,6 +179,7 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     reply,
     startNewMember,
     startMember: vi.fn(),
+    startMemberWithMessage,
     resumeMember: vi.fn(),
     clearBinding: vi.fn(),
     wakeSquad: vi.fn(),
@@ -186,6 +190,7 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     result.ok
       ? { ok: true, value: result.value }
       : { ok: false, message: result.message, details: result.raw };
+  const recordDiagnostic = vi.fn(async () => undefined);
   const dependencies: CouncilIpcDependencies = {
     isTrusted: () => trusted,
     getState: () => undefined,
@@ -206,6 +211,7 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     confirmStartNew,
     confirmStartSquad,
     confirmMissionIntegration,
+    recordDiagnostic,
     afterAction,
   };
   registerCouncilIpc(registrar, dependencies);
@@ -217,11 +223,13 @@ function fixture(trusted = true, confirm = true, councilBound = false) {
     logs,
     reply,
     startNewMember,
+    startMemberWithMessage,
     startCouncilReview,
     confirmStartNew,
     confirmStartSquad,
     confirmMissionIntegration,
     missionController,
+    recordDiagnostic,
   };
 }
 
@@ -264,6 +272,61 @@ describe('typed privileged IPC handlers', () => {
       'profile-12345678',
       'ordinary text',
     );
+  });
+
+  it('starts an individual agent with a bounded multiline message', async () => {
+    const f = fixture();
+    const result = await f.invoke(
+      IPC_CHANNELS.startMemberWithMessage,
+      'profile-12345678',
+      'a'.repeat(64),
+      'Review this repository.\nFocus on correctness.',
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(f.startMemberWithMessage).toHaveBeenCalledExactlyOnceWith(
+      'profile-12345678',
+      'a'.repeat(64),
+      'Review this repository.\nFocus on correctness.',
+    );
+  });
+
+  it('returns a structured Mission blocker and records its correlation ID', async () => {
+    const f = fixture();
+    const problem = new Error('Mission revision changed; refresh before retrying.');
+    problem.name = 'StaleMissionPlanError';
+    vi.mocked(f.missionController.createMission).mockRejectedValueOnce(problem);
+    const result = await f.invoke(IPC_CHANNELS.createMission, {
+      expectedRevision: 0,
+      title: 'Mission',
+      objective: 'Prove the failure path.',
+      tasks: [{ title: 'Task', description: 'Run it.' }],
+    }) as { correlationId?: string };
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'stale-revision',
+      operation: 'create draft',
+      message: problem.message,
+    });
+    expect(result.correlationId).toMatch(/^mission-[0-9a-f]{8}$/);
+    expect(f.recordDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ id: result.correlationId, code: 'stale-revision' }),
+    );
+  });
+
+  it('never exposes a secret-bearing Mission exception to the renderer', async () => {
+    const f = fixture();
+    vi.mocked(f.missionController.createMission).mockRejectedValueOnce(
+      new Error('Provider failed with api_key=do-not-render-this'),
+    );
+    const result = await f.invoke(IPC_CHANNELS.createMission, {
+      expectedRevision: 0,
+      title: 'Mission',
+      objective: 'Prove redaction.',
+      tasks: [{ title: 'Task', description: 'Run it.' }],
+    }) as { message: string; code: string };
+    expect(result.code).toBe('provider-unavailable');
+    expect(result.message).not.toContain('do-not-render-this');
+    expect(result.message).toContain('mission-');
   });
 
   it('blocks control/oversized reply values before supervisor access', async () => {

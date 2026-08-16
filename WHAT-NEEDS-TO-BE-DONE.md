@@ -5,6 +5,39 @@ Work in this document is ordered by user impact and dependency. Do not begin
 multi-window or distribution work until the existing session, Mission, and
 diagnostic paths are observable and reliable.
 
+## Implementation status after the repair pass
+
+Implemented in the uncommitted working tree on 2026-08-16:
+
+- structured Mission failures, correlation IDs, redacted bounded journal, and
+  visible Refresh changed/unchanged status;
+- typed actionable Attention items and interactive Diagnostics cards;
+- safe bounded recent-output rendering with reload and copy;
+- automatic Council progress/result projection with explicit result markers
+  and compatibility for the already-completed live transcript;
+- direct Start with message and exact idle-session messaging;
+- conflict-safe Repository Agent Pack preview/install with a versioned manifest;
+- saved single-runtime Office switching by workspace ID; and
+- packaged Codex discovery in current VS Code and VS Code Insiders extension
+  layouts for x64 and ARM64.
+
+Automated verification is green (`npx tsc --noEmit`, 48 test files / 431 tests,
+build, and x64 unpacked packaging). The following work remains and must not be
+treated as verified or complete:
+
+- run the installed-app matrix in Phase 4, especially live output, direct chat,
+  the current completed Council transcript, a minimal Claude Mission, Codex
+  authentication/App Server initialization, and three saved repositories;
+- add Agent Pack update/uninstall with backup restoration. The current installer
+  is idempotent and conflict-safe but intentionally has no destructive uninstall;
+- add the user-selected Codex executable override/picker and attempted-location
+  history. Automatic discovery for the observed VS Code path is implemented;
+- add Mission abandoned-draft reset and validate live retry behavior;
+- add per-workspace UI preference restoration and inactive-office activity
+  summaries; and
+- keep concurrent windows blocked until every IPC request carries and validates
+  an exact workspace ID and runtime-registry isolation tests pass.
+
 ## Confirmed working
 
 - The local NSIS installer completes and the installed application launches.

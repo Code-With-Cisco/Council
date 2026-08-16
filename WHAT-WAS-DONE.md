@@ -107,3 +107,57 @@ and nothing was pushed.
 The remaining checks in `WHAT-NEEDS-TO-BE-DONE.md` require a refreshed Claude
 login, a naturally wedged supervisor, or human visual/installer interaction.
 They are not represented as verified.
+
+## Installed-app workflow repair pass
+
+Implemented on 2026-08-16 after testing the installed application. These
+changes are present only in the working tree; they were not committed or
+pushed.
+
+- Replaced generic Mission exception handling with stable failure codes,
+  operation names, recommended actions, and correlation IDs. Technical detail
+  is written to a bounded, secret-redacting local JSONL journal instead of
+  being exposed to the renderer.
+- Made Mission Refresh report its check time and whether state/revision changed.
+- Added one renderer-safe issue model for session, catalog, binding, provider,
+  and preflight problems. Attention now lists every issue and navigates by exact
+  profile or diagnostic identity.
+- Repaired recent output presentation: successful logs are stripped of ANSI,
+  OSC, cursor, and unsafe control sequences; bounded to a tail; and shown with
+  loading, empty, unavailable, reload, and copy states.
+- Added a Council result envelope to the lead protocol. The Council view polls
+  the exact bound transcript, recognizes both new envelopes and the completed
+  pre-envelope Chairman format, separates result progress from the retained
+  session state, and exposes the final result plus copy/transcript controls.
+- Added direct individual conversations. An unstarted agent accepts a bounded
+  multiline initial message through the existing argv-safe launch transaction;
+  an exact active session reporting `working`/`idle` accepts a PTY-backed
+  message. Explicitly stopped sessions remain stopped.
+- Made warning/error Diagnostics cards expandable, copyable, and refreshable.
+  Refresh re-runs the privileged preflight rather than merely repainting stale
+  state.
+- Added an explicit Repository Agent Pack preview/install flow. It installs the
+  specialist and Council definitions plus guarded PowerShell scripts, merges
+  missing hook groups into valid project settings, records a versioned
+  manifest, and refuses to overwrite differing definitions or malformed or
+  conflicting settings.
+- Added a saved Office selector. Trusted repositories can be switched by opaque
+  workspace ID without opening the folder picker; activation still disposes the
+  prior runtime and preserves workspace-scoped bindings and Mission state.
+- Extended packaged Codex discovery to scan bounded OpenAI VS Code and VS Code
+  Insiders extension directories, choose the newest matching Windows x64/ARM64
+  bundle, probe its native `codex.exe`, and report `vscode-extension` as the
+  discovery source.
+
+### Repair-pass verification
+
+- `npx tsc --noEmit`: passed.
+- `npm test`: 48 files, 431 tests, 0 failures.
+- `npm run build`: passed.
+- `npm run pack:win`: passed for the x64 unpacked application after allowing
+  electron-builder to download its required Electron artifact.
+- A real fallback probe with PATH deliberately treated as missing found
+  `C:\Users\User\.vscode\extensions\openai.chatgpt-26.810.52044-win32-x64\bin\windows-x86_64\codex.exe`,
+  reported `vscode-extension`, and parsed version `0.148.0-alpha.9`.
+- No installed-app interaction, live agent launch, live Mission, or live Codex
+  connection is claimed by this automated pass.

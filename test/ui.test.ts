@@ -74,6 +74,9 @@ describe('Windows Electron shell', () => {
       'council: (question, expectedDefinitionFingerprint)',
     );
     expect(preload).toContain('chooseWorkspace: ()');
+    expect(preload).toContain('activateWorkspace: (workspaceId)');
+    expect(preload).toContain('installAgentPack: ()');
+    expect(preload).toContain('startMemberWithMessage: (profileId, expectedDefinitionFingerprint, message)');
     expect(preload).toContain(
       'startNewMember: (profileId, expectedDefinitionFingerprint)',
     );
@@ -144,6 +147,11 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('api.recordGate({');
     expect(renderer).toContain('api.approveIntegration(preview.digest)');
     expect(renderer).toContain('councilSlot?.validation?.fingerprint');
+    expect(renderer).toContain('COUNCIL RESULT BEGIN');
+    expect(renderer).toContain('Copy result');
+    expect(renderer).toContain('Start with message');
+    expect(renderer).toContain('api.activateWorkspace(targetId)');
+    expect(renderer).toContain('api.installAgentPack()');
     expect(
       renderer.match(
         /DecagramCouncilSceneViewModel\.invokeProfileStart\(slot, profileActions\)/g,

@@ -113,6 +113,30 @@ describe('AppConfigStore', () => {
     expect(restarted.config.includeUserDefinitions).toBe(false);
   });
 
+  it('switches among saved workspaces by opaque ID without selecting a folder again', async () => {
+    const root = await temporaryRoot('saved-workspaces');
+    const userData = path.join(root, 'userData');
+    const firstPath = path.join(root, 'first');
+    const secondPath = path.join(root, 'second');
+    await mkdir(firstPath, { recursive: true });
+    await mkdir(secondPath, { recursive: true });
+    const ids = [
+      'ws_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      'ws_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    ];
+    const store = new AppConfigStore(userData, { workspaceId: () => ids.shift()! });
+    await store.load();
+    const first = await store.selectWorkspace(firstPath);
+    await store.confirmWorkspaceTrust(first.id);
+    await store.selectWorkspace(secondPath);
+
+    const activated = await store.activateWorkspace(first.id);
+
+    expect(activated.id).toBe(first.id);
+    expect(store.activeWorkspace?.id).toBe(first.id);
+    expect(store.current.workspaces).toHaveLength(2);
+  });
+
   it('treats canonical path casing as one workspace under Windows semantics', async () => {
     const userData = await temporaryRoot('windows-case');
     let canonicalPath = '/Projects/Council';

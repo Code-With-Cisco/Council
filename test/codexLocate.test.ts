@@ -70,4 +70,40 @@ describe('Codex executable discovery', () => {
       }),
     ).toBeNull();
   });
+
+  it('discovers the native Codex bundled with the newest VS Code extension', async () => {
+    const home = path.resolve('/home', 'person');
+    const expected = path.join(
+      home,
+      '.vscode',
+      'extensions',
+      'openai.chatgpt-26.810.52044-win32-x64',
+      'bin',
+      'windows-x86_64',
+      'codex.exe',
+    );
+    const located = await locateCodex({
+      home,
+      readDirectory: async (directory) =>
+        directory.endsWith(path.join('.vscode', 'extensions'))
+          ? [
+              'someone.else-1.0.0',
+              'openai.chatgpt-26.72.100-win32-x64',
+              'openai.chatgpt-26.810.52044-win32-x64',
+            ]
+          : [],
+      exists: async (candidate) => candidate === expected,
+      probe: async (candidate) => ({
+        ok: candidate === expected,
+        output: candidate === expected ? 'codex-cli 1.8.0' : 'missing',
+        missing: candidate !== expected,
+      }),
+    });
+
+    expect(located).toEqual({
+      executable: expected,
+      version: '1.8.0',
+      discoveredVia: 'vscode-extension',
+    });
+  });
 });

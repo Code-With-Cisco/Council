@@ -102,6 +102,9 @@ describe('ClaudeCodeAgentSupervisor', () => {
     ).toBe(false);
     expect(isSafePlainTextReplyState({ ...waiting, state: 'done' } as Session)).toBe(true);
     expect(isSafePlainTextReplyState({ ...waiting, state: 'failed' } as Session)).toBe(true);
+    expect(
+      isSafePlainTextReplyState({ ...waiting, state: 'working', status: 'idle' } as Session),
+    ).toBe(true);
   });
 
   it('rejects unknown profile and session ids before invoking the CLI', async () => {
