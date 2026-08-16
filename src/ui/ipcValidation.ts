@@ -15,6 +15,7 @@ import type {
 
 export { MAX_PROFILE_ID_LENGTH };
 export const MAX_REPLY_LENGTH = 8_000;
+export const MAX_INITIAL_MESSAGE_LENGTH = 20_000;
 export const MAX_COUNCIL_QUESTION_LENGTH = 20_000;
 export const MAX_MISSION_TITLE_LENGTH = 512;
 export const MAX_MISSION_OBJECTIVE_LENGTH = 20_000;
@@ -105,6 +106,10 @@ export function validateReplyText(value: unknown): string | undefined {
     return undefined;
   }
   return value;
+}
+
+export function validateInitialMessage(value: unknown): string | undefined {
+  return boundedText(value, MAX_INITIAL_MESSAGE_LENGTH, true);
 }
 
 export function validateCouncilQuestion(value: unknown): string | undefined {

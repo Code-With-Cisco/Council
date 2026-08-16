@@ -45,6 +45,9 @@ let pendingSquadPreview;
 let pendingIntegrationPreview;
 let pendingHandoffTarget;
 let pendingGateTarget;
+let councilProjection;
+let councilPollTimer;
+let councilPollInFlight = false;
 const missionRoleSelections = new Map();
 
 const byId = (id) => document.getElementById(id);
@@ -147,6 +150,15 @@ function assignmentText(badge) {
   return `${badge.missionTitle} · ${badge.label} · ${badge.taskState} · ${provider}`;
 }
 
+function failureSummary(result, fallback = 'Action could not be completed.') {
+  if (!result || result.ok) return fallback;
+  return [
+    result.message || fallback,
+    result.recommendedAction,
+    result.correlationId ? `Reference: ${result.correlationId}` : undefined,
+  ].filter(Boolean).join(' ');
+}
+
 async function runAction(button, pendingText, action) {
   const oldText = button.textContent;
   button.disabled = true;
@@ -154,7 +166,7 @@ async function runAction(button, pendingText, action) {
   try {
     const result = await action();
     if (!result.ok) {
-      setFeedback(result.message);
+      setFeedback(failureSummary(result));
       return result;
     }
     setFeedback('Action completed.');
@@ -170,17 +182,56 @@ async function runAction(button, pendingText, action) {
 
 function renderAttention(snapshot) {
   const channel = byId('attention-channel');
-  const sessions = snapshot?.needsInput ?? [];
-  if (sessions.length === 0) {
+  const issues = [...(state?.issues ?? [])];
+  if (missionState?.problem) {
+    issues.push({
+      id: `mission:${missionState.status}`,
+      severity: missionState.status === 'blocked' ? 'error' : 'warning',
+      source: 'mission',
+      summary: missionState.status === 'blocked' ? 'Mission ledger is blocked' : 'Mission state is unavailable',
+      detail: missionState.problem,
+      destination: { view: 'missions' },
+      actions: ['open', 'refresh'],
+    });
+  }
+  if (issues.length === 0) {
     channel.hidden = true;
     return;
   }
-  const first = sessions[0];
   channel.hidden = false;
-  byId('attention-title').textContent = first.name ?? first.id ?? 'A specialist';
-  byId('attention-detail').textContent = first.waitingFor ?? first.detail ?? 'Waiting for input';
-  byId('attention-count').textContent =
-    sessions.length === 1 ? '1 item' : `${sessions.length} items · showing first`;
+  byId('attention-count').textContent = `${issues.length} item${issues.length === 1 ? '' : 's'}`;
+  const list = byId('attention-list');
+  list.replaceChildren();
+  for (const issue of issues) {
+    const item = element('li');
+    const button = element('button', `attention-item is-${issue.severity}`);
+    button.type = 'button';
+    button.append(
+      element('strong', '', issue.summary),
+      element('span', '', issue.detail),
+    );
+    button.addEventListener('click', () => openIssue(issue));
+    item.append(button);
+    list.append(item);
+  }
+}
+
+function openIssue(issue) {
+  activateView(issue.destination.view);
+  if (issue.destination.profileId) {
+    selectedKey = issue.destination.profileId;
+    if (issue.destination.view === 'squad') renderSquad(state?.snapshot);
+    if (issue.destination.view === 'council') renderCouncil(state?.snapshot);
+  }
+  requestAnimationFrame(() => {
+    const target = issue.destination.diagnosticKey
+      ? document.querySelector(`[data-diagnostic-key="${issue.destination.diagnosticKey}"]`)
+      : issue.destination.profileId
+        ? document.querySelector(`[data-profile-id="${issue.destination.profileId}"]`)
+        : document.querySelector(`#view-${issue.destination.view}`);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target?.querySelector?.('input:not(:disabled), button:not(:disabled)')?.focus();
+  });
 }
 
 function renderOffice(snapshot) {
@@ -500,6 +551,7 @@ function renderDetail(slot) {
 }
 
 function renderAgentDetail(panel, slot, kicker, options = {}) {
+  panel.dataset.profileId = slot.member.key;
   panel.replaceChildren();
   const session = slot.session;
   panel.append(element('p', 'eyebrow', kicker));
@@ -572,14 +624,39 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
       });
       panel.append(clear);
     } else if (options.allowStart !== false) {
-      const start = element('button', 'button button-primary', 'Start agent');
+      const prompt = element('textarea');
+      prompt.rows = 4;
+      prompt.maxLength = 20000;
+      prompt.placeholder = `Message ${slot.member.label} to start a direct conversation (optional)`;
+      prompt.setAttribute('aria-label', `Initial message for ${slot.member.label}`);
+      const startActions = element('div', 'card-actions');
+      const start = element('button', 'button', 'Start agent');
       start.disabled = !canStart(slot);
       start.addEventListener('click', async () => {
         await runAction(start, 'Starting…', () =>
           window.DecagramCouncilSceneViewModel.invokeProfileStart(slot, profileActions),
         );
       });
-      panel.append(start);
+      const startWithMessage = element('button', 'button button-primary', 'Start with message');
+      startWithMessage.disabled = !canStart(slot);
+      startWithMessage.addEventListener('click', async () => {
+        const message = prompt.value.trim();
+        if (!message) {
+          setFeedback('Enter a message before starting the conversation.');
+          prompt.focus();
+          return;
+        }
+        const result = await runAction(startWithMessage, 'Starting…', () =>
+          profileActions.startWithMessage(
+            slot.member.key,
+            slot.validation?.fingerprint,
+            message,
+          ),
+        );
+        if (result?.ok) prompt.value = '';
+      });
+      startActions.append(start, startWithMessage);
+      panel.append(prompt, startActions);
     }
     return;
   }
@@ -594,13 +671,42 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
 
   const log = element('pre', 'log-output', 'Select “Load recent output” to read this session.');
   const load = element('button', 'button', 'Load recent output');
+  const copy = element('button', 'button', 'Copy output');
+  copy.disabled = true;
+  let loadedOutput = '';
   load.disabled = !actionsFor(slot).logs;
   load.addEventListener('click', async () => {
+    log.dataset.state = 'loading';
+    log.textContent = 'Loading recent provider output…';
     const result = await runAction(load, 'Loading…', () => profileActions.logs(slot.member.key));
-    log.textContent = result?.ok ? result.value || '(No output)' : result?.message ?? 'Unable to load output.';
+    if (result?.ok) {
+      loadedOutput = result.value || '';
+      log.dataset.state = loadedOutput === '' ? 'empty' : 'loaded';
+      log.textContent = loadedOutput || '(The provider returned no recent output.)';
+      copy.disabled = loadedOutput === '';
+      load.textContent = 'Reload output';
+    } else {
+      loadedOutput = '';
+      copy.disabled = true;
+      log.dataset.state = 'unavailable';
+      log.textContent = [
+        result?.message ?? 'Unable to load output.',
+        result?.recommendedAction,
+        result?.correlationId ? `Reference: ${result.correlationId}` : undefined,
+      ].filter(Boolean).join('\n');
+    }
+  });
+  copy.addEventListener('click', async () => {
+    if (loadedOutput === '') return;
+    try {
+      await navigator.clipboard.writeText(loadedOutput);
+      setFeedback('Recent output copied.');
+    } catch {
+      setFeedback('The output could not be copied. Select the text manually.');
+    }
   });
   const actions = element('div', 'card-actions');
-  actions.append(load);
+  actions.append(load, copy);
   if (slot.bindingState === 'active') {
     const stop = element('button', 'button button-danger', 'Stop session');
     stop.disabled = !actionsFor(slot).stop;
@@ -642,18 +748,18 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
   reply.placeholder = canReply(slot)
     ? session.state === 'done' || session.state === 'failed'
       ? 'Send a reply and resume this conversation'
-      : 'Send a plain-text reply'
+      : 'Message this agent'
     : session.waitingFor && session.waitingFor !== 'input needed'
       ? `Reply disabled: waiting for ${session.waitingFor}`
       : session.state === 'stopped'
         ? 'Reply disabled: this session was explicitly stopped'
-        : 'Reply unavailable unless waiting for ordinary text input';
+        : 'Message unavailable until this exact session is idle or requests text input';
   reply.disabled = !canReply(slot);
   const wakesSession = session.state === 'done' || session.state === 'failed';
   const send = element(
     'button',
     'button button-primary',
-    wakesSession ? 'Reply & resume' : 'Send',
+    wakesSession ? 'Reply & resume' : 'Message agent',
   );
   send.disabled = !canReply(slot);
   send.addEventListener('click', async () => {
@@ -690,6 +796,7 @@ function renderCouncil(snapshot) {
       allowStart: false,
       allowStartNew: false,
     });
+    renderCouncilResult(panel, slot);
   }
 
   const councilButton = byId('council-form').querySelector(
@@ -1376,6 +1483,9 @@ function renderMissions(snapshot) {
 }
 
 async function refreshMissionState() {
+  const priorStatus = missionState?.status;
+  const priorRevision = missionState?.revision;
+  const checkedAt = new Date();
   try {
     const result = await api.getMissionState();
     missionState = result.ok
@@ -1384,7 +1494,7 @@ async function refreshMissionState() {
           status: 'unavailable',
           workspaceId: state?.workspace.id,
           revision: 0,
-          problem: result.message,
+          problem: failureSummary(result, 'Mission state is unavailable.'),
           providers: [],
           gatePolicy: undefined,
           projection: undefined,
@@ -1400,16 +1510,172 @@ async function refreshMissionState() {
       projection: undefined,
     };
   }
+  const changed =
+    priorStatus !== missionState?.status || priorRevision !== missionState?.revision;
+  byId('mission-refresh-status').textContent =
+    `${changed ? 'Changed' : 'Unchanged'} · checked ${checkedAt.toLocaleTimeString()}`;
   if (state) render();
   else renderMissions(undefined);
 }
 
 function diagnosticCard(label, value, detail, tone) {
   const card = element('article', 'diagnostic-card');
+  const diagnosticKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  card.dataset.diagnosticKey = diagnosticKey;
   card.append(element('h3', '', label));
   card.append(element('p', `diagnostic-value ${tone ?? ''}`, value));
-  card.append(element('p', 'diagnostic-detail', detail));
+  const detailNode = element('p', 'diagnostic-detail', detail);
+  card.append(detailNode);
+  if (tone === 'is-warning' || tone === 'is-bad') {
+    detailNode.hidden = true;
+    const actions = element('div', 'diagnostic-actions');
+    const toggle = element('button', 'button button-compact', 'Show details');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      const expanded = detailNode.hidden;
+      detailNode.hidden = !expanded;
+      toggle.textContent = expanded ? 'Hide details' : 'Show details';
+      toggle.setAttribute('aria-expanded', String(expanded));
+    });
+    const copy = element('button', 'button button-compact', 'Copy diagnostic');
+    copy.type = 'button';
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(`${label}: ${value}\n${detail}`);
+        setFeedback(`${label} diagnostic copied.`);
+      } catch {
+        setFeedback('The diagnostic could not be copied. Expand it and select the text manually.');
+      }
+    });
+    const refresh = element('button', 'button button-compact', 'Refresh status');
+    refresh.type = 'button';
+    refresh.addEventListener('click', async () => {
+      const result = await runAction(refresh, 'Refreshing…', () => api.refreshDiagnostics());
+      if (result?.ok) {
+        state = { ...state, preflight: result.value };
+        renderDiagnostics();
+        setFeedback('Diagnostics refreshed.');
+      }
+    });
+    actions.append(toggle, copy, refresh);
+    card.append(actions);
+  }
   return card;
+}
+
+function parseCouncilProjection(output) {
+  const blockedIndex = output.lastIndexOf('COUNCIL BLOCKED -');
+  if (blockedIndex >= 0) {
+    return {
+      state: 'blocked',
+      result: output.slice(blockedIndex).split('\n')[0].slice(0, 2000),
+      transcript: output,
+    };
+  }
+  const beginIndex = output.lastIndexOf('COUNCIL RESULT BEGIN');
+  const endIndex = output.indexOf('COUNCIL RESULT END', Math.max(0, beginIndex));
+  if (beginIndex >= 0 && endIndex > beginIndex) {
+    return {
+      state: 'complete',
+      result: output.slice(beginIndex + 'COUNCIL RESULT BEGIN'.length, endIndex).trim().slice(-24000),
+      transcript: output,
+    };
+  }
+  // Compatibility with Council sessions launched before result envelopes were added.
+  const decisionIndex = Math.max(
+    output.lastIndexOf("Chairman's Decision"),
+    output.lastIndexOf('Chairman’s Decision'),
+  );
+  const mappingIndex = output.lastIndexOf('## Advisor Mapping');
+  if (decisionIndex >= 0 && mappingIndex > decisionIndex) {
+    return {
+      state: 'complete',
+      result: output.slice(decisionIndex).trim().slice(-24000),
+      transcript: output,
+    };
+  }
+  const lower = output.toLowerCase();
+  const stateName = lower.includes('council-chairman') || lower.includes('chairman verdict')
+    ? 'chairman'
+    : lower.includes('peer review') || lower.includes('response e')
+      ? 'peer-review'
+      : 'collecting';
+  return { state: stateName, result: '', transcript: output };
+}
+
+function renderCouncilResult(panel, slot) {
+  const projection = councilProjection?.profileId === slot.member.key
+    ? councilProjection
+    : { state: 'collecting', result: '', transcript: '' };
+  const resultPanel = element('section', `council-result is-${projection.state}`);
+  resultPanel.setAttribute('aria-live', 'polite');
+  resultPanel.append(
+    element('p', 'eyebrow', 'COUNCIL RESULT'),
+    element(
+      'h3',
+      '',
+      projection.state === 'complete'
+        ? 'Council complete'
+        : projection.state === 'blocked'
+          ? 'Council blocked'
+          : projection.state === 'chairman'
+            ? 'Chairman is deciding'
+            : projection.state === 'peer-review'
+              ? 'Peer review in progress'
+              : 'Collecting advisor responses',
+    ),
+  );
+  if (projection.result) {
+    resultPanel.append(element('pre', 'council-verdict', projection.result));
+    const actions = element('div', 'card-actions');
+    const copy = element('button', 'button', 'Copy result');
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(projection.result);
+        setFeedback('Council result copied.');
+      } catch {
+        setFeedback('The result could not be copied. Select the text manually.');
+      }
+    });
+    const transcript = element('button', 'button', 'View transcript');
+    transcript.addEventListener('click', () => {
+      const output = resultPanel.querySelector('.council-transcript');
+      output.hidden = !output.hidden;
+      transcript.textContent = output.hidden ? 'View transcript' : 'Hide transcript';
+    });
+    actions.append(copy, transcript);
+    const full = element('pre', 'log-output council-transcript', projection.transcript);
+    full.hidden = true;
+    resultPanel.append(actions, full);
+  } else {
+    resultPanel.append(element('p', 'muted', 'Status updates automatically from the exact Council transcript.'));
+  }
+  panel.append(resultPanel);
+  scheduleCouncilRefresh(slot, projection.state === 'complete' || projection.state === 'blocked');
+}
+
+function scheduleCouncilRefresh(slot, terminal) {
+  clearTimeout(councilPollTimer);
+  if (!slot.session?.id || terminal) return;
+  const refresh = async () => {
+    if (councilPollInFlight) return;
+    councilPollInFlight = true;
+    try {
+      const result = await api.logs(slot.member.key);
+      if (result.ok) {
+        councilProjection = { profileId: slot.member.key, ...parseCouncilProjection(result.value || '') };
+        if (activeView === 'council') renderCouncil(state?.snapshot);
+      }
+    } catch (error) {
+      if (activeView === 'council') {
+        setFeedback(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      councilPollInFlight = false;
+    }
+  };
+  councilPollTimer = setTimeout(refresh, councilProjection?.profileId === slot.member.key ? 5000 : 0);
 }
 
 function providerDiagnosticCards() {
@@ -1534,6 +1800,21 @@ function renderDiagnostics() {
 function renderWorkspace() {
   const workspace = state?.workspace;
   const ready = workspace?.status === 'ready' && workspace.trusted;
+  const switcher = byId('workspace-switcher');
+  const workspaces = state?.savedWorkspaces ?? [];
+  const signature = workspaces.map((entry) => `${entry.id}:${entry.label}:${entry.trusted}`).join('|');
+  if (switcher.dataset.signature !== signature) {
+    switcher.replaceChildren();
+    for (const entry of workspaces) {
+      const option = element('option', '', `${entry.label}${entry.trusted ? '' : ' (trust required)'}`);
+      option.value = entry.id;
+      switcher.append(option);
+    }
+    switcher.dataset.signature = signature;
+  }
+  switcher.hidden = workspaces.length === 0;
+  switcher.disabled = workspaces.length < 2;
+  if (workspace?.id) switcher.value = workspace.id;
   byId('workspace-setup').hidden = ready;
   document.querySelector('.tabs').hidden = !ready;
   document.querySelector('main').hidden = false;
@@ -1593,6 +1874,29 @@ for (const tab of document.querySelectorAll('.tab')) {
   });
 }
 
+byId('workspace-switcher').addEventListener('change', async (event) => {
+  const switcher = event.currentTarget;
+  const targetId = switcher.value;
+  if (!targetId || targetId === state?.workspace.id) return;
+  switcher.disabled = true;
+  const result = await api.activateWorkspace(targetId);
+  if (!result.ok) {
+    setFeedback(failureSummary(result, 'Workspace switch failed.'));
+    switcher.value = state?.workspace.id ?? '';
+    switcher.disabled = (state?.savedWorkspaces?.length ?? 0) < 2;
+    return;
+  }
+  state = result.value;
+  missionState = undefined;
+  councilProjection = undefined;
+  selectedKey = undefined;
+  officePage = 0;
+  missionRoleSelections.clear();
+  byId('council-project').textContent = state.projectDir ?? 'No workspace';
+  render();
+  await refreshMissionState();
+});
+
 async function chooseWorkspace() {
   const button = byId('change-workspace-button');
   const setupButton = byId('workspace-setup-button');
@@ -1606,6 +1910,7 @@ async function chooseWorkspace() {
     }
     state = result.value;
     missionState = undefined;
+    councilProjection = undefined;
     pendingSquadPreview = undefined;
     pendingIntegrationPreview = undefined;
     pendingHandoffTarget = undefined;
@@ -1910,6 +2215,17 @@ byId('recover-supervisor-button').addEventListener('click', async (event) => {
     : recovery.raw || (recovery.alreadyStopped ? 'No daemon was running.' : 'Supervisor stopped.');
 });
 
+byId('install-agent-pack-button').addEventListener('click', async (event) => {
+  const result = await runAction(event.currentTarget, 'Opening preview…', () =>
+    api.installAgentPack(),
+  );
+  if (result?.ok) {
+    setFeedback(
+      `Agent Pack v${result.value.version} installed: ${result.value.created} created, ${result.value.merged} merged, ${result.value.unchanged} unchanged.`,
+    );
+  }
+});
+
 byId('council-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector('button[type="submit"]');
@@ -1926,6 +2242,10 @@ byId('council-form').addEventListener('submit', async (event) => {
   feedback.textContent = result?.ok
     ? `Council started as session ${result.value.id}.`
     : result?.message ?? 'Council could not start.';
+  if (result?.ok) {
+    councilProjection = undefined;
+    renderCouncil(state?.snapshot);
+  }
 });
 
 api.onSnapshot((snapshot) => {

@@ -195,6 +195,7 @@ h3 {
 
 .attention-channel {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
@@ -234,6 +235,37 @@ h3 {
 
 .attention-channel strong {
   margin-right: 8px;
+}
+
+.attention-list {
+  flex-basis: 100%;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attention-item {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid rgba(232, 163, 61, 0.35);
+  border-radius: 5px;
+  color: #f5d79e;
+  background: rgba(8, 13, 24, 0.55);
+}
+
+.attention-item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.attention-item:hover,
+.attention-item:focus-visible {
+  border-color: var(--amber);
 }
 
 .count-badge {
@@ -852,6 +884,53 @@ label {
   margin: 0;
   padding-left: 20px;
   color: var(--muted);
+}
+
+#workspace-switcher {
+  width: auto;
+  min-width: 150px;
+  max-width: 240px;
+}
+
+.council-result {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #2d3b58;
+  border-radius: 7px;
+  background: #0b111d;
+}
+
+.council-result.is-complete {
+  border-color: rgba(124, 196, 158, 0.6);
+}
+
+.council-result.is-blocked {
+  border-color: rgba(217, 128, 114, 0.65);
+}
+
+.council-verdict {
+  max-height: 520px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #202c45;
+  border-radius: 6px;
+  color: #dbe5f8;
+  background: #080d18;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diagnostic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.mission-refresh-meta {
+  display: grid;
+  gap: 4px;
+  text-align: right;
 }
 
 .roster-surface {

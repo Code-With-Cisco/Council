@@ -570,6 +570,14 @@ export class AppConfigStore {
     return workspace;
   }
 
+  async activateWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceRecord> {
+    if (!isWorkspaceId(workspaceId)) throw new Error('Invalid workspace ID.');
+    const workspace = this.config.workspaces.find((entry) => entry.id === workspaceId);
+    if (workspace === undefined) throw new Error('That saved workspace no longer exists.');
+    await this.save({ ...this.config, activeWorkspaceId: workspace.id });
+    return workspace;
+  }
+
   async confirmWorkspaceTrust(workspaceId: WorkspaceId): Promise<WorkspaceRecord> {
     if (workspaceId !== this.config.activeWorkspaceId) {
       throw new Error('Only the active workspace can be trusted.');

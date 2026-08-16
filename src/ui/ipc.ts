@@ -28,13 +28,17 @@ import type {
 export const IPC_CHANNELS = {
   getState: 'dc:get-state',
   chooseWorkspace: 'dc:choose-workspace',
+  activateWorkspace: 'dc:activate-workspace',
   startMember: 'dc:start-member',
+  startMemberWithMessage: 'dc:start-member-with-message',
   startNewMember: 'dc:start-new-member',
   resumeMember: 'dc:resume-member',
   clearBinding: 'dc:clear-binding',
   stopSession: 'dc:stop-session',
   wakeSquad: 'dc:wake-squad',
   recoverSupervisor: 'dc:recover-supervisor',
+  refreshDiagnostics: 'dc:refresh-diagnostics',
+  installAgentPack: 'dc:install-agent-pack',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -63,6 +67,20 @@ export interface UiWorkspaceState {
   readonly trusted: boolean;
   readonly developmentOverride: boolean;
   readonly diagnostic: string | undefined;
+}
+
+export interface UiIssue {
+  readonly id: string;
+  readonly severity: 'attention' | 'warning' | 'error';
+  readonly source: 'session' | 'mission' | 'catalog' | 'binding' | 'provider' | 'preflight';
+  readonly summary: string;
+  readonly detail: string;
+  readonly destination: {
+    readonly view: 'squad' | 'missions' | 'council' | 'diagnostics';
+    readonly profileId?: string | undefined;
+    readonly diagnosticKey?: string | undefined;
+  };
+  readonly actions: readonly ('open' | 'reply' | 'resume' | 'retry' | 'refresh')[];
 }
 
 export interface UiExecutableStatus {
@@ -116,12 +134,30 @@ export interface UiState {
   readonly catalog: ResolvedAgentCatalog | undefined;
   readonly bindingProblem: SessionBindingStoreProblem | undefined;
   readonly snapshot: Snapshot | undefined;
+  readonly issues: readonly UiIssue[];
+  readonly savedWorkspaces?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly trusted: boolean;
+  }[] | undefined;
 }
 
 export interface UiFailure {
   readonly ok: false;
   readonly message: string;
   readonly details?: string | undefined;
+  /** Stable renderer-safe category; never a raw exception class or provider payload. */
+  readonly code?:
+    | 'ledger-blocked'
+    | 'provider-unavailable'
+    | 'stale-revision'
+    | 'invalid-assignment'
+    | 'worktree-failure'
+    | 'unexpected'
+    | undefined;
+  readonly operation?: string | undefined;
+  readonly correlationId?: string | undefined;
+  readonly recommendedAction?: string | undefined;
 }
 
 export interface UiSuccess<T> {
@@ -134,9 +170,15 @@ export type UiResult<T> = UiSuccess<T> | UiFailure;
 export interface DecagramCouncilApi {
   getState(): Promise<UiState>;
   chooseWorkspace(): Promise<UiResult<UiState>>;
+  activateWorkspace(workspaceId: string): Promise<UiResult<UiState>>;
   startMember(
     profileId: string,
     expectedDefinitionFingerprint: string,
+  ): Promise<UiResult<StartSessionOutcome>>;
+  startMemberWithMessage(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+    message: string,
   ): Promise<UiResult<StartSessionOutcome>>;
   startNewMember(
     profileId: string,
@@ -147,6 +189,13 @@ export interface DecagramCouncilApi {
   stopSession(profileId: string): Promise<UiResult<string>>;
   wakeSquad(): Promise<UiResult<string>>;
   recoverSupervisor(): Promise<UiResult<DaemonStopOutcome>>;
+  refreshDiagnostics(): Promise<UiResult<UiLaunchPreflight>>;
+  installAgentPack(): Promise<UiResult<{
+    readonly version: number;
+    readonly created: number;
+    readonly merged: number;
+    readonly unchanged: number;
+  }>>;
   logs(profileId: string): Promise<UiResult<string>>;
   reply(profileId: string, message: string): Promise<UiResult<ReplyOutcome>>;
   council(

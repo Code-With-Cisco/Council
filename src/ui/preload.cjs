@@ -5,13 +5,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 const channels = {
   getState: 'dc:get-state',
   chooseWorkspace: 'dc:choose-workspace',
+  activateWorkspace: 'dc:activate-workspace',
   startMember: 'dc:start-member',
+  startMemberWithMessage: 'dc:start-member-with-message',
   startNewMember: 'dc:start-new-member',
   resumeMember: 'dc:resume-member',
   clearBinding: 'dc:clear-binding',
   stopSession: 'dc:stop-session',
   wakeSquad: 'dc:wake-squad',
   recoverSupervisor: 'dc:recover-supervisor',
+  refreshDiagnostics: 'dc:refresh-diagnostics',
+  installAgentPack: 'dc:install-agent-pack',
   logs: 'dc:logs',
   reply: 'dc:reply',
   council: 'dc:council',
@@ -34,11 +38,19 @@ const channels = {
 contextBridge.exposeInMainWorld('decagramCouncil', {
   getState: () => ipcRenderer.invoke(channels.getState),
   chooseWorkspace: () => ipcRenderer.invoke(channels.chooseWorkspace),
+  activateWorkspace: (workspaceId) => ipcRenderer.invoke(channels.activateWorkspace, workspaceId),
   startMember: (profileId, expectedDefinitionFingerprint) =>
     ipcRenderer.invoke(
       channels.startMember,
       profileId,
       expectedDefinitionFingerprint,
+    ),
+  startMemberWithMessage: (profileId, expectedDefinitionFingerprint, message) =>
+    ipcRenderer.invoke(
+      channels.startMemberWithMessage,
+      profileId,
+      expectedDefinitionFingerprint,
+      message,
     ),
   startNewMember: (profileId, expectedDefinitionFingerprint) =>
     ipcRenderer.invoke(
@@ -51,6 +63,8 @@ contextBridge.exposeInMainWorld('decagramCouncil', {
   stopSession: (profileId) => ipcRenderer.invoke(channels.stopSession, profileId),
   wakeSquad: () => ipcRenderer.invoke(channels.wakeSquad),
   recoverSupervisor: () => ipcRenderer.invoke(channels.recoverSupervisor),
+  refreshDiagnostics: () => ipcRenderer.invoke(channels.refreshDiagnostics),
+  installAgentPack: () => ipcRenderer.invoke(channels.installAgentPack),
   logs: (profileId) => ipcRenderer.invoke(channels.logs, profileId),
   reply: (profileId, message) => ipcRenderer.invoke(channels.reply, profileId, message),
   council: (question, expectedDefinitionFingerprint) =>

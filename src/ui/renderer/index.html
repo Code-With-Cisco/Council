@@ -16,6 +16,7 @@
           <h1>Decagram Council <span class="title-suffix">/ Ops Deck</span></h1>
         </div>
         <div class="topbar-actions">
+          <select id="workspace-switcher" aria-label="Saved office"></select>
           <span id="workspace-label" class="mono-label">No workspace</span>
           <button id="change-workspace-button" class="button" type="button">Choose workspace</button>
           <span id="connection-state" class="connection-pill">Starting…</span>
@@ -37,10 +38,11 @@
       <section id="attention-channel" class="attention-channel" hidden>
         <div>
           <span class="attention-kicker">ATTENTION</span>
-          <strong id="attention-title"></strong>
-          <span id="attention-detail"></span>
+          <strong id="attention-title">Items need action</strong>
+          <span id="attention-detail">Choose an item to open its resolution controls.</span>
         </div>
         <span id="attention-count" class="count-badge"></span>
+        <ul id="attention-list" class="attention-list"></ul>
       </section>
 
       <nav class="tabs" aria-label="Primary views">
@@ -139,7 +141,10 @@
               <p class="eyebrow">COUNCIL-OWNED ORCHESTRATION</p>
               <h2>Missions</h2>
             </div>
-            <span id="mission-revision" class="mono-label">LEDGER UNAVAILABLE</span>
+            <div class="mission-refresh-meta">
+              <span id="mission-revision" class="mono-label">LEDGER UNAVAILABLE</span>
+              <span id="mission-refresh-status" class="muted" role="status">Not refreshed yet</span>
+            </div>
           </div>
           <div id="mission-provider-status" class="provider-status-grid"
             aria-label="Mission provider status"></div>
@@ -320,6 +325,13 @@
             <span id="preflight-time" class="muted"></span>
           </div>
           <div id="diagnostics-grid" class="diagnostics-grid"></div>
+          <section class="message-panel">
+            <h3>Repository Agent Pack</h3>
+            <p class="muted">Preview and install Council agents plus guarded PowerShell hooks into this trusted repository. Existing conflicting files are never overwritten.</p>
+            <button id="install-agent-pack-button" class="button button-primary" type="button">
+              Preview Agent Pack install
+            </button>
+          </section>
           <section class="message-panel">
             <h3>Supervisor recovery</h3>
             <p class="muted">Stops the supervisor while keeping detached workers. The next roster read restarts it.</p>

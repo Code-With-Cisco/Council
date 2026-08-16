@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 export interface LocatedCodex {
   readonly executable: string;
   readonly version: string | undefined;
-  readonly discoveredVia: 'override' | 'path' | 'well-known' | 'chatgpt';
+  readonly discoveredVia: 'override' | 'path' | 'well-known' | 'chatgpt' | 'vscode-extension';
 }
 
 export interface CodexProbeResult {
@@ -23,6 +23,7 @@ export interface LocateCodexOptions {
   readonly resourcesPath?: string | undefined;
   readonly probe?: ((executable: string) => Promise<CodexProbeResult>) | undefined;
   readonly exists?: ((candidate: string) => Promise<boolean>) | undefined;
+  readonly readDirectory?: ((directory: string) => Promise<readonly string[]>) | undefined;
 }
 
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
@@ -137,6 +138,36 @@ async function npmNativeCandidates(
   return candidates;
 }
 
+async function vscodeExtensionCandidates(
+  home: string,
+  readDirectory: (directory: string) => Promise<readonly string[]>,
+): Promise<string[]> {
+  const candidates: string[] = [];
+  for (const extensionRoot of [
+    path.join(home, '.vscode', 'extensions'),
+    path.join(home, '.vscode-insiders', 'extensions'),
+  ]) {
+    let entries: readonly string[] = [];
+    try {
+      entries = await readDirectory(extensionRoot);
+    } catch {
+      // VS Code and VS Code Insiders are optional discovery locations.
+    }
+    const openAiExtensions = entries
+      .filter((entry) => /^openai\.chatgpt-.+-win32-(?:x64|arm64)$/i.test(entry))
+      .sort((left, right) => right.localeCompare(left, 'en-US', { numeric: true }));
+    for (const extension of openAiExtensions) {
+      const architecture = extension.toLowerCase().endsWith('-arm64')
+        ? 'windows-aarch64'
+        : 'windows-x86_64';
+      candidates.push(
+        path.join(extensionRoot, extension, 'bin', architecture, 'codex.exe'),
+      );
+    }
+  }
+  return candidates;
+}
+
 export async function locateCodex(
   options: LocateCodexOptions = {},
 ): Promise<LocatedCodex | null> {
@@ -144,6 +175,7 @@ export async function locateCodex(
   const home = options.home ?? homedir();
   const probe = options.probe ?? probeCodexExecutable;
   const candidateExists = options.exists ?? exists;
+  const readDirectory = options.readDirectory ?? ((directory: string) => readdir(directory));
   const binaryName = 'codex.exe';
   const candidates: Array<{
     executable: string;
@@ -212,6 +244,13 @@ export async function locateCodex(
     via: 'well-known',
     requiresExistence: true,
   });
+  for (const executable of await vscodeExtensionCandidates(home, readDirectory)) {
+    candidates.push({
+      executable,
+      via: 'vscode-extension',
+      requiresExistence: true,
+    });
+  }
   for (const executable of await npmNativeCandidates(home, env)) {
     candidates.push({
       executable,

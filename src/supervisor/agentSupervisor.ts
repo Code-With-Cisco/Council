@@ -73,6 +73,7 @@ function domainFailure(message: string, argv: readonly string[] = []): CliFailur
 export function isSafePlainTextReplyState(session: Session | undefined): boolean {
   if (session?.id === undefined) return false;
   if (session.state === 'done' || session.state === 'failed') return true;
+  if (session.state === 'working' && session.status?.toLowerCase() === 'idle') return true;
   return session.state === 'blocked' && session.waitingFor === 'input needed';
 }
 
@@ -190,6 +191,19 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
     );
   }
 
+  startMemberWithMessage(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+    message: string,
+  ): Promise<CliResult<StartSessionOutcome>> {
+    return this.trackResult(() =>
+      this.launchCoordinator.startProfile(profileId, {
+        expectedDefinitionFingerprint,
+        promptOverride: message,
+      }),
+    );
+  }
+
   startNewMember(
     profileId: string,
     expectedDefinitionFingerprint: string,
@@ -300,7 +314,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
         action: async (session) => {
           if (!isSafePlainTextReplyState(session)) {
             return domainFailure(
-              'One-line Reply is available only for ordinary text input or a resumable done/failed session. Explicitly stopped sessions stay stopped.',
+              'Message is available for an idle active agent, ordinary text input, or a resumable done/failed session. Explicitly stopped sessions stay stopped.',
               ['attach', session.id!],
             );
           }

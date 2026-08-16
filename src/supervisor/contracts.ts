@@ -36,6 +36,11 @@ export interface AgentSupervisorPort {
     profileId: string,
     expectedDefinitionFingerprint: string,
   ): Promise<CliResult<StartSessionOutcome>>;
+  startMemberWithMessage(
+    profileId: string,
+    expectedDefinitionFingerprint: string,
+    message: string,
+  ): Promise<CliResult<StartSessionOutcome>>;
   startNewMember(
     profileId: string,
     expectedDefinitionFingerprint: string,

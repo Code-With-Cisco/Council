@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import type { CliResult } from '../integration/types.js';
 import type { AgentSupervisorPort } from '../supervisor/contracts.js';
 import type { MissionUiController } from './missionUi.js';
+import { sanitizeTerminalOutput } from './logOutput.js';
 import {
   IPC_CHANNELS,
   type UiFailure,
@@ -12,6 +14,7 @@ import {
   validateCreateCandidateInput,
   validateCreateMissionInput,
   validateDefinitionFingerprint,
+  validateInitialMessage,
   validateMissionDigest,
   validatePreviewIntegrationInput,
   validatePreviewSquadInput,
@@ -33,14 +36,30 @@ export interface CouncilIpcDependencies {
   readonly isTrusted: (event: unknown) => boolean;
   readonly getState: () => UiState | undefined;
   readonly chooseWorkspace: () => Promise<UiResult<UiState>>;
+  readonly activateWorkspace?: ((workspaceId: string) => Promise<UiResult<UiState>>) | undefined;
   readonly getSupervisor: () => AgentSupervisorPort | undefined;
   readonly getMissionController: () => MissionUiController | undefined;
   readonly recoverSupervisor: () => Promise<UiResult<import('../integration/types.js').DaemonStopOutcome>>;
+  readonly refreshDiagnostics?: () => Promise<UiResult<import('./ipc.js').UiLaunchPreflight>>;
+  readonly installAgentPack?: (() => Promise<UiResult<{
+    readonly version: number;
+    readonly created: number;
+    readonly merged: number;
+    readonly unchanged: number;
+  }>>) | undefined;
   /** True only while the current definition projection is authoritative. */
   readonly canLaunchDefinitions: () => boolean;
   readonly confirmStartNew: () => Promise<boolean>;
   readonly confirmStartSquad: () => Promise<boolean>;
   readonly confirmMissionIntegration: () => Promise<boolean>;
+  readonly recordDiagnostic?: ((entry: {
+    readonly id: string;
+    readonly occurredAt: string;
+    readonly operation: string;
+    readonly code: string;
+    readonly errorName: string;
+    readonly message: string;
+  }) => Promise<void>) | undefined;
   readonly afterAction: <T>(result: CliResult<T>) => Promise<UiResult<T>>;
 }
 
@@ -54,6 +73,7 @@ function profileIdOrFailure(value: unknown): string | UiFailure {
 
 async function runMissionAction<T>(
   dependencies: CouncilIpcDependencies,
+  operation: string,
   action: (controller: MissionUiController) => Promise<T>,
 ): Promise<UiResult<T>> {
   const controller = dependencies.getMissionController();
@@ -62,13 +82,70 @@ async function runMissionAction<T>(
   }
   try {
     return { ok: true, value: await action(controller) };
-  } catch {
-    // Unexpected privileged errors can contain repository paths, provider
-    // payloads, or process details. Expected blockers belong in the typed
-    // preview/state projection instead of crossing this boundary as raw text.
-    return unavailable(
-      'Mission action could not be completed. Refresh Mission state for current blockers.',
-    );
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const lower = rawMessage.toLocaleLowerCase('en-US');
+    const code: NonNullable<UiFailure['code']> =
+      errorName === 'StaleMissionPlanError' ||
+      errorName.endsWith('ConflictError') ||
+      lower.includes('revision') ||
+      lower.includes('changed after') ||
+      lower.includes('refresh before')
+        ? 'stale-revision'
+        : lower.includes('provider') ||
+            lower.includes('codex') ||
+            lower.includes('claude') ||
+            lower.includes('authentication')
+          ? 'provider-unavailable'
+          : errorName.includes('Worktree') ||
+              errorName === 'MissionGitAdapterError' ||
+              lower.includes('worktree')
+            ? 'worktree-failure'
+            : lower.includes('ledger') || errorName.includes('StoreBlocked')
+              ? 'ledger-blocked'
+              : errorName === 'MissionUiControllerError' ||
+                  errorName === 'MissionDomainError'
+                ? 'invalid-assignment'
+                : 'unexpected';
+    const safeExpected =
+      code !== 'unexpected' &&
+      rawMessage.length > 0 &&
+      rawMessage.length <= 2_000 &&
+      !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(rawMessage) &&
+      !/(?:\b(?:sk-ant|sk-proj|sess|key)-[A-Za-z0-9_-]{8,}\b|authorization\s*:|api[_-]?key\s*[=:])/i.test(rawMessage) &&
+      !/(?:[A-Za-z]:[\\/]|\\\\|(?:^|\s)\/(?:[^/\s]+\/)+)/.test(rawMessage);
+    const correlationId = `mission-${randomUUID().slice(0, 8)}`;
+    await dependencies.recordDiagnostic?.({
+      id: correlationId,
+      occurredAt: new Date().toISOString(),
+      operation,
+      code,
+      errorName,
+      message: rawMessage,
+    });
+    const recommendedAction =
+      code === 'stale-revision'
+        ? 'Refresh Mission state, review the changed plan, and retry.'
+        : code === 'provider-unavailable'
+          ? 'Open Diagnostics, restore the selected provider, and retry this step.'
+          : code === 'worktree-failure'
+            ? 'Check repository and worktree diagnostics before retrying.'
+            : code === 'ledger-blocked'
+              ? 'Repair or restore the Mission ledger before making further changes.'
+              : code === 'invalid-assignment'
+                ? 'Review the selected roles and current Mission state, then edit or retry.'
+                : 'Copy the correlation ID from Diagnostics and inspect the local diagnostic journal.';
+    return {
+      ok: false,
+      code,
+      operation,
+      correlationId,
+      recommendedAction,
+      message: safeExpected
+        ? rawMessage
+        : `Mission ${operation} failed unexpectedly (${correlationId}).`,
+    };
   }
 }
 
@@ -181,9 +258,50 @@ export function registerCouncilIpc(
     return dependencies.afterAction(await supervisor.wakeSquad());
   });
 
+  registrar.handle(IPC_CHANNELS.activateWorkspace, (event, rawWorkspaceId) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    if (typeof rawWorkspaceId !== 'string' || rawWorkspaceId.length > 80) {
+      return unavailable('Invalid workspace ID.');
+    }
+    return dependencies.activateWorkspace?.(rawWorkspaceId) ?? unavailable('Saved workspace switching is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.startMemberWithMessage, async (
+    event,
+    rawProfileId,
+    rawDefinitionFingerprint,
+    rawMessage,
+  ) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    if (!dependencies.canLaunchDefinitions()) {
+      return unavailable('Agent definitions are stale or runtime launch is unavailable. Resolve Diagnostics before starting.');
+    }
+    const supervisor = dependencies.getSupervisor();
+    if (supervisor === undefined) return unavailable('Claude integration is unavailable.');
+    const profileId = profileIdOrFailure(rawProfileId);
+    if (typeof profileId !== 'string') return profileId;
+    const definitionFingerprint = validateDefinitionFingerprint(rawDefinitionFingerprint);
+    if (definitionFingerprint === undefined) return unavailable('Invalid displayed definition fingerprint.');
+    const message = validateInitialMessage(rawMessage);
+    if (message === undefined) return unavailable('Initial message must be plain text between 1 and 20,000 characters.');
+    return dependencies.afterAction(
+      await supervisor.startMemberWithMessage(profileId, definitionFingerprint, message),
+    );
+  });
+
   registrar.handle(IPC_CHANNELS.recoverSupervisor, async (event) => {
     if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
     return dependencies.recoverSupervisor();
+  });
+
+  registrar.handle(IPC_CHANNELS.refreshDiagnostics, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.refreshDiagnostics?.() ?? unavailable('Diagnostics refresh is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.installAgentPack, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.installAgentPack?.() ?? unavailable('Agent Pack installation is unavailable.');
   });
 
   registrar.handle(IPC_CHANNELS.logs, async (event, rawProfileId) => {
@@ -192,7 +310,10 @@ export function registerCouncilIpc(
     if (supervisor === undefined) return unavailable('Claude CLI is unavailable.');
     const profileId = profileIdOrFailure(rawProfileId);
     if (typeof profileId !== 'string') return profileId;
-    return dependencies.afterAction(await supervisor.logs(profileId));
+    const result = await supervisor.logs(profileId);
+    return dependencies.afterAction(
+      result.ok ? { ...result, value: sanitizeTerminalOutput(result.value) } : result,
+    );
   });
 
   registrar.handle(IPC_CHANNELS.reply, async (event, rawProfileId, rawMessage) => {
@@ -251,7 +372,7 @@ export function registerCouncilIpc(
     if (!dependencies.isTrusted(event)) {
       return unavailable('Untrusted IPC sender.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'refresh state', (controller) =>
       controller.getState(),
     );
   });
@@ -264,7 +385,7 @@ export function registerCouncilIpc(
     if (input === undefined) {
       return unavailable('Invalid bounded Mission draft.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'create draft', (controller) =>
       controller.createMission(input),
     );
   });
@@ -277,7 +398,7 @@ export function registerCouncilIpc(
     if (input === undefined) {
       return unavailable('Invalid opaque squad preview request.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'preview squad', (controller) =>
       controller.previewSquad(input),
     );
   });
@@ -293,7 +414,7 @@ export function registerCouncilIpc(
     if (!(await dependencies.confirmStartSquad())) {
       return unavailable('Start Squad was canceled.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'start squad', (controller) =>
       controller.startSquad(digest),
     );
   });
@@ -308,7 +429,7 @@ export function registerCouncilIpc(
       if (input === undefined) {
         return unavailable('Invalid blocked Mission execution retry.');
       }
-      return runMissionAction(dependencies, (controller) =>
+      return runMissionAction(dependencies, 'retry assignment', (controller) =>
         controller.retryBlockedExecution(input),
       );
     },
@@ -322,7 +443,7 @@ export function registerCouncilIpc(
     if (input === undefined) {
       return unavailable('Invalid exact handoff evidence.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'record handoff', (controller) =>
       controller.recordHandoff(input),
     );
   });
@@ -335,7 +456,7 @@ export function registerCouncilIpc(
     if (input === undefined) {
       return unavailable('Invalid ordered handoff selection.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'create candidate', (controller) =>
       controller.createCandidate(input),
     );
   });
@@ -348,7 +469,7 @@ export function registerCouncilIpc(
     if (input === undefined) {
       return unavailable('Invalid bounded gate request.');
     }
-    return runMissionAction(dependencies, (controller) =>
+    return runMissionAction(dependencies, 'run gate', (controller) =>
       controller.recordGate(input),
     );
   });
@@ -363,7 +484,7 @@ export function registerCouncilIpc(
       if (input === undefined) {
         return unavailable('Invalid opaque integration preview request.');
       }
-      return runMissionAction(dependencies, (controller) =>
+      return runMissionAction(dependencies, 'preview integration', (controller) =>
         controller.previewIntegration(input),
       );
     },
@@ -382,7 +503,7 @@ export function registerCouncilIpc(
       if (!(await dependencies.confirmMissionIntegration())) {
         return unavailable('Integration approval was canceled.');
       }
-      return runMissionAction(dependencies, (controller) =>
+      return runMissionAction(dependencies, 'approve integration', (controller) =>
         controller.approveIntegration(digest),
       );
     },
@@ -398,7 +519,7 @@ export function registerCouncilIpc(
       if (digest === undefined) {
         return unavailable('Invalid integration approval fingerprint.');
       }
-      return runMissionAction(dependencies, (controller) =>
+      return runMissionAction(dependencies, 'reject integration', (controller) =>
         controller.rejectIntegration(digest),
       );
     },

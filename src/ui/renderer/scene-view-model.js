@@ -61,6 +61,8 @@
         hasExactSession &&
         ((slot.session.state === 'blocked' &&
           slot.session.waitingFor === 'input needed') ||
+          (slot.session.state === 'working' &&
+            slot.session.status?.toLowerCase() === 'idle') ||
           slot.session.state === 'done' ||
           slot.session.state === 'failed'),
       clear:
@@ -74,6 +76,8 @@
     return Object.freeze({
       start: (profileId, expectedDefinitionFingerprint) =>
         api.startMember(profileId, expectedDefinitionFingerprint),
+      startWithMessage: (profileId, expectedDefinitionFingerprint, message) =>
+        api.startMemberWithMessage(profileId, expectedDefinitionFingerprint, message),
       startNew: (profileId, expectedDefinitionFingerprint) =>
         api.startNewMember(profileId, expectedDefinitionFingerprint),
       resume: (profileId) => api.resumeMember(profileId),

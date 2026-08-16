@@ -101,6 +101,10 @@ Spawn `council-chairman` with that full packet.
 
 ## 7. Return the result
 
+After validating all five sign-offs, emit this exact line:
+
+`COUNCIL RESULT BEGIN`
+
 Emit the chairman's verdict verbatim. Then append:
 
 ## Advisor Mapping
@@ -111,4 +115,11 @@ Emit the chairman's verdict verbatim. Then append:
 - Response D: `<advisor>`
 - Response E: `<advisor>`
 
-Do not revise, soften, summarize, or supplement the chairman's decision.
+Finally emit this exact line:
+
+`COUNCIL RESULT END`
+
+Do not revise, soften, summarize, or supplement the chairman's decision. The
+two result markers and mapping are the only allowed additions. If the workflow
+cannot complete, emit the existing `COUNCIL BLOCKED - <reason>` line and do not
+emit either result marker.

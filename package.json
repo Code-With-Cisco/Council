@@ -48,7 +48,8 @@
       "src/ui/preload.cjs",
       "src/ui/renderer/**/*",
       "scripts/gates/*.ps1",
-      ".claude/agents/council-*.md",
+      ".claude/agents/*.md",
+      ".claude/settings.json",
       "package.json"
     ],
     "directories": {

@@ -64,12 +64,15 @@ import { acquireSingleInstance } from './singleInstance.js';
 import {
   IPC_CHANNELS,
   type UiFailure,
+  type UiIssue,
   type UiLaunchPreflight,
   type UiResult,
   type UiState,
   type UiWorkspaceState,
 } from './ipc.js';
 import { registerCouncilIpc } from './ipcHandlers.js';
+import { DiagnosticJournal } from './diagnosticJournal.js';
+import { AgentPackInstaller } from './agentPack.js';
 import type { MissionUiController } from './missionUi.js';
 import { PrivilegedMissionUiController } from './missionController.js';
 import {
@@ -107,6 +110,7 @@ let codexMissionProvider: CodexMissionProviderAdapter | undefined;
 let missionLedgerStore: MissionLedgerStore;
 let worktreeLeaseStore: WorktreeLeaseStore;
 let claudePaths: ClaudePaths;
+let diagnosticJournal: DiagnosticJournal;
 let profileStore: RosterConfigStore | undefined;
 let savedRoster: RosterConfigStoreLoad | undefined;
 let supervisorActionsReady = false;
@@ -226,7 +230,84 @@ function initialState(workspace: UiWorkspaceState, startupMessages: readonly str
     catalog: undefined,
     bindingProblem: bindingStore?.problem,
     snapshot: undefined,
+    issues: [],
   };
+}
+
+function deriveUiIssues(state: UiState): readonly UiIssue[] {
+  const issues: UiIssue[] = [];
+  const snapshot = state.snapshot;
+  for (const session of snapshot?.needsInput ?? []) {
+    if (snapshot === undefined) break;
+    const slot = snapshot.roster.squad.find(
+      (candidate) => candidate.session?.id === session.id,
+    );
+    issues.push({
+      id: `session:${session.id ?? session.sessionId ?? session.name ?? 'unknown'}`,
+      severity: 'attention',
+      source: 'session',
+      summary: `${session.name ?? slot?.member.label ?? 'Agent'} needs attention`,
+      detail: session.waitingFor ?? session.detail ?? 'Waiting for input',
+      destination: {
+        view: slot?.member.mode === 'internal' ? 'council' : 'squad',
+        profileId: slot?.member.key,
+      },
+      actions: [
+        'open',
+        ...(session.waitingFor === 'input needed' ? (['reply'] as const) : []),
+      ],
+    });
+  }
+  if (snapshot?.rosterError !== undefined) {
+    issues.push({
+      id: 'provider:claude-roster',
+      severity: 'error',
+      source: 'provider',
+      summary: 'Claude roster is unavailable',
+      detail: snapshot.rosterError.message,
+      destination: { view: 'diagnostics', diagnosticKey: 'claude-daemon' },
+      actions: ['open', 'refresh'],
+    });
+  }
+  if (snapshot?.definitionError !== undefined) {
+    issues.push({
+      id: 'catalog:definitions',
+      severity: 'error',
+      source: 'catalog',
+      summary: 'Agent definitions need attention',
+      detail: snapshot.definitionError,
+      destination: { view: 'diagnostics', diagnosticKey: 'agent-catalog' },
+      actions: ['open', 'refresh'],
+    });
+  }
+  if (state.bindingProblem !== undefined) {
+    issues.push({
+      id: 'binding:store',
+      severity: 'error',
+      source: 'binding',
+      summary: 'Session bindings need attention',
+      detail: state.bindingProblem.message,
+      destination: { view: 'diagnostics', diagnosticKey: 'session-bindings' },
+      actions: ['open', 'refresh'],
+    });
+  }
+  if (state.preflight?.claude === null) {
+    issues.push({
+      id: 'preflight:claude',
+      severity: 'error',
+      source: 'preflight',
+      summary: 'Claude CLI was not found',
+      detail: 'Install Claude Code or configure its executable before starting agents.',
+      destination: { view: 'diagnostics', diagnosticKey: 'claude-cli' },
+      actions: ['open', 'refresh'],
+    });
+  }
+  return issues;
+}
+
+function refreshCurrentIssues(): void {
+  if (currentState === undefined) return;
+  currentState = { ...currentState, issues: deriveUiIssues(currentState) };
 }
 
 function toUiPreflight(preflight: LaunchPreflight): UiLaunchPreflight {
@@ -318,7 +399,17 @@ function catalogOnlySnapshot(
 }
 
 function publishState(): void {
-  if (currentState === undefined || mainWindow === undefined || mainWindow.isDestroyed()) return;
+  if (currentState === undefined) return;
+  refreshCurrentIssues();
+  currentState = {
+    ...currentState,
+    savedWorkspaces: appConfigStore.current.workspaces.map(({ id, label, trusted }) => ({
+      id,
+      label,
+      trusted,
+    })),
+  };
+  if (mainWindow === undefined || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(IPC_CHANNELS.state, currentState);
 }
 
@@ -374,6 +465,7 @@ function publishSnapshot(snapshot: Snapshot): void {
       capabilities: runtimeCapabilities,
       bindingProblem: bindingStore?.problem,
     };
+    refreshCurrentIssues();
   }
   if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(IPC_CHANNELS.snapshot, effectiveSnapshot);
@@ -439,6 +531,7 @@ function registerIpc(): void {
       isTrusted: (event) => isTrustedIpcSender(event as IpcMainInvokeEvent),
       getState: () => currentState,
       chooseWorkspace,
+      activateWorkspace: activateSavedWorkspace,
       getSupervisor: () => (supervisorActionsReady ? supervisor : undefined),
       getMissionController: () => missionUiController,
       recoverSupervisor: async () => {
@@ -450,6 +543,64 @@ function registerIpc(): void {
           keepWorkers: true,
         });
         return toUiResult(result);
+      },
+      refreshDiagnostics: async () => {
+        const projectDir = currentState?.projectDir;
+        if (projectDir === undefined) {
+          return unavailable('Choose a trusted repository before refreshing diagnostics.');
+        }
+        try {
+          const preflight = await runLaunchPreflight(projectDir);
+          const rendered = toUiPreflight(preflight);
+          if (currentState !== undefined) {
+            currentState = { ...currentState, preflight: rendered };
+            publishState();
+          }
+          return { ok: true, value: rendered };
+        } catch (error) {
+          return unavailable(
+            `Diagnostics refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+      installAgentPack: async () => {
+        const projectDir = currentState?.projectDir;
+        if (projectDir === undefined || currentState?.workspace.trusted !== true) {
+          return unavailable('Choose and trust a repository before installing the Agent Pack.');
+        }
+        try {
+          const installer = new AgentPackInstaller(app.getAppPath(), projectDir);
+          const preview = await installer.preview();
+          const detail = preview.items
+            .map((item) => `${item.action.toUpperCase()}: ${item.relativePath}\n  ${item.detail}`)
+            .join('\n');
+          if (!preview.canInstall) {
+            await dialog.showMessageBox(mainWindow!, {
+              type: 'warning',
+              title: 'Agent Pack conflicts require attention',
+              message: 'No files were changed.',
+              detail,
+              buttons: ['Close'],
+              noLink: true,
+            });
+            return unavailable('Agent Pack has conflicting files. Review the preview; nothing was overwritten.');
+          }
+          const confirmation = await dialog.showMessageBox(mainWindow!, {
+            type: 'question',
+            title: 'Install Agent Pack?',
+            message: `Install Agent Pack v${preview.version} into ${currentState.workspace.label ?? 'this repository'}?`,
+            detail,
+            buttons: ['Install', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          });
+          if (confirmation.response !== 0) return unavailable('Agent Pack installation was canceled.');
+          const result = await installer.install(preview);
+          return { ok: true, value: result };
+        } catch (error) {
+          return unavailable(`Agent Pack installation failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       },
       canLaunchDefinitions: () =>
         currentState?.capabilities.start === true &&
@@ -497,6 +648,7 @@ function registerIpc(): void {
         });
         return confirmation.response === 0;
       },
+      recordDiagnostic: (entry) => diagnosticJournal.record(entry),
       afterAction,
     },
   );
@@ -615,6 +767,31 @@ async function chooseWorkspace(): Promise<UiResult<UiState>> {
         : initialState(setupWorkspaceState(message), [message]);
     publishState();
     return unavailable(message);
+  }
+}
+
+async function activateSavedWorkspace(workspaceId: string): Promise<UiResult<UiState>> {
+  const target = appConfigStore.current.workspaces.find((workspace) => workspace.id === workspaceId);
+  if (target === undefined) return unavailable('That saved workspace no longer exists.');
+  if (currentState?.workspace.id === target.id) return { ok: true, value: currentState };
+  try {
+    const validated = await validateWorkspaceDirectory(target.selectedPath);
+    if (!sameCanonicalPath(validated.canonicalPath, target.canonicalPath)) {
+      return unavailable('The saved repository now resolves to a different location. Choose it again to review trust.');
+    }
+    const selected = await appConfigStore.activateWorkspace(target.id);
+    const result = await applicationLifecycle.enqueue<UiResult<UiState>>(async (context) => {
+      const generation = ++activationGeneration;
+      await disposeActiveRuntime();
+      if (!isActivationCurrent(generation, context)) return unavailable('Workspace switch was superseded.');
+      await activateWorkspace(selected, false, generation, context);
+      return currentState === undefined
+        ? unavailable('Workspace activation did not complete.')
+        : { ok: true, value: currentState };
+    });
+    return result ?? unavailable('Council is shutting down.');
+  } catch (error) {
+    return unavailable(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -772,6 +949,7 @@ async function activateWorkspace(
   }
 
   const userData = app.getPath('userData');
+  diagnosticJournal = new DiagnosticJournal(userData);
   const missionWorktreeRoot = path.join(userData, 'mission-worktrees');
   const gateWorktreeRoot = path.join(userData, 'mission-gate-worktrees');
   const emptyHooksPath = path.join(userData, 'council-empty-git-hooks');
@@ -980,6 +1158,7 @@ async function activateWorkspace(
     startupMessages,
     catalog,
     bindingProblem: bindingStore.problem,
+    issues: [],
     snapshot:
       initialProfileProblem === undefined
         ? initialSnapshot
@@ -1050,7 +1229,7 @@ async function activateWorkspace(
       await created.stop().catch(() => undefined);
       if (supervisor === created) supervisor = undefined;
       if (claudeSupervisor === created) claudeSupervisor = undefined;
-      currentState = { ...currentState, startupMessages: [...startupMessages] };
+      currentState = { ...currentState!, startupMessages: [...startupMessages] };
       publishState();
     }
   } else {
@@ -1060,7 +1239,7 @@ async function activateWorkspace(
         ? 'Claude CLI was not found. Catalog remains visible; runtime actions are disabled.'
         : `Claude Code ${preflight.claude.version ?? '(unknown)'} is below the supported minimum.`,
     );
-    currentState = { ...currentState, startupMessages: [...startupMessages] };
+    currentState = { ...currentState!, startupMessages: [...startupMessages] };
     publishState();
   }
 
