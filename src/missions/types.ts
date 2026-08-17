@@ -7,7 +7,7 @@
  */
 
 export const MISSION_LEDGER_VERSION = 1 as const;
-export const MAX_PREVIEW_ROLE_INSTRUCTIONS = 24_000;
+export const MAX_PREVIEW_ROLE_INSTRUCTIONS = 100_000;
 
 export type MissionId = string;
 export type MissionTaskId = string;

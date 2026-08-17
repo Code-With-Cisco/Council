@@ -83,7 +83,7 @@ const PROVIDER_IDS = new Set<UiMissionProviderId>([
   'codex',
 ]);
 const SHA_256 = /^[0-9a-f]{64}$/;
-const MAX_PREVIEW_ROLE_INSTRUCTIONS = 24_000;
+const MAX_PREVIEW_ROLE_INSTRUCTIONS = 100_000;
 const UNSAFE_MULTILINE_CONTROL =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 

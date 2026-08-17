@@ -1,7 +1,7 @@
 {
   "name": "decagram-council",
   "productName": "Decagram Council",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Windows mission control for Claude Code and Codex agents",
   "main": "dist/src/ui/main.js",

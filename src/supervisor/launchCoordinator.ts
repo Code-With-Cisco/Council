@@ -11,6 +11,7 @@ import type {
   Session,
 } from '../integration/types.js';
 import { detectUnknownAgentWarning } from '../integration/cli/errors.js';
+import { isValidProfileId } from '../profileIdentity.js';
 import type { AgentProviderAdapter } from '../providers/contracts.js';
 import {
   resolveExactBindingSession,
@@ -74,6 +75,8 @@ export interface StartProfileOptions {
   readonly permissionModeOverride?: 'plan' | undefined;
   readonly missionExecutionId?: string | undefined;
   readonly missionAccessMode?: MissionBindingAccessMode | undefined;
+  /** Privileged Mission-only durable owner; leaves the office profile free. */
+  readonly bindingProfileId?: string | undefined;
 }
 
 export interface ExactBoundSessionActionOptions<T> {
@@ -166,7 +169,7 @@ function bindingIdentityCandidateCount(
 
 function matchesMissionLaunchIdentity(
   record: SessionBindingRecord | PendingLaunchRecord,
-  profileId: string,
+  bindingProfileId: string,
   options: StartProfileOptions,
   platform: NodeJS.Platform,
 ): boolean {
@@ -175,7 +178,7 @@ function matchesMissionLaunchIdentity(
     options.missionAccessMode !== undefined &&
     options.expectedDefinitionFingerprint !== undefined &&
     options.launchCwd !== undefined &&
-    record.profileId === profileId &&
+    record.profileId === bindingProfileId &&
     record.missionExecutionId === options.missionExecutionId &&
     record.missionAccessMode === options.missionAccessMode &&
     record.definitionFingerprint ===
@@ -225,17 +228,31 @@ export class SafeLaunchCoordinator {
         ),
       );
     }
-    const existing = this.starts.get(profileId);
+    if (
+      options.bindingProfileId !== undefined &&
+      (options.missionExecutionId === undefined ||
+        !isValidProfileId(options.bindingProfileId))
+    ) {
+      return Promise.resolve(
+        failure(
+          'A separate binding owner is valid only for a Mission launch.',
+        ),
+      );
+    }
+    const bindingProfileId = options.bindingProfileId ?? profileId;
+    const existing = this.starts.get(bindingProfileId);
     if (existing !== undefined) return existing;
 
-    const transaction = this.withProfileLock(profileId, async () => {
+    const transaction = this.withProfileLock(bindingProfileId, async () => {
       const result = await this.runStart(profileId, options);
       await this.options.refresh().catch(() => undefined);
       return result;
     }).finally(() => {
-      if (this.starts.get(profileId) === transaction) this.starts.delete(profileId);
+      if (this.starts.get(bindingProfileId) === transaction) {
+        this.starts.delete(bindingProfileId);
+      }
     });
-    this.starts.set(profileId, transaction);
+    this.starts.set(bindingProfileId, transaction);
     return transaction;
   }
 
@@ -545,7 +562,6 @@ export class SafeLaunchCoordinator {
               return;
             }
             await this.reconcilePending(
-              profile,
               pending,
               listed.value,
               expectedExisting,
@@ -598,6 +614,7 @@ export class SafeLaunchCoordinator {
     profileId: string,
     startOptions: StartProfileOptions,
   ): Promise<CliResult<StartSessionOutcome>> {
+    const bindingProfileId = startOptions.bindingProfileId ?? profileId;
     await this.options.bindings.reload();
     if (this.options.bindings.problem !== undefined) {
       return failure(
@@ -618,10 +635,10 @@ export class SafeLaunchCoordinator {
     const listed = await this.options.provider.listSessions({ all: true });
     if (!listed.ok) return listed;
 
-    const existingBinding = this.options.bindings.getBinding(profileId);
+    const existingBinding = this.options.bindings.getBinding(bindingProfileId);
     if (
       existingBinding !== undefined &&
-      (existingBinding.profileId !== profileId ||
+      (existingBinding.profileId !== bindingProfileId ||
         existingBinding.workspaceId !== this.options.workspace.id)
     ) {
       return failure('The persisted binding belongs to a different workspace.');
@@ -635,7 +652,7 @@ export class SafeLaunchCoordinator {
         startOptions.missionExecutionId !== undefined;
       const exactMissionBinding = matchesMissionLaunchIdentity(
         existingBinding,
-        profileId,
+        bindingProfileId,
         startOptions,
         this.platform,
       );
@@ -682,10 +699,10 @@ export class SafeLaunchCoordinator {
       return failure('This conversation is stopped or complete. Choose Resume or Start new.');
     }
 
-    const pending = this.options.bindings.getPendingLaunch(profileId);
+    const pending = this.options.bindings.getPendingLaunch(bindingProfileId);
     if (pending !== undefined) {
       if (
-        pending.profileId !== profileId ||
+        pending.profileId !== bindingProfileId ||
         pending.workspaceId !== this.options.workspace.id
       ) {
         return failure('The pending launch belongs to a different workspace.');
@@ -696,7 +713,7 @@ export class SafeLaunchCoordinator {
         (missionStart &&
           !matchesMissionLaunchIdentity(
             pending,
-            profileId,
+            bindingProfileId,
             startOptions,
             this.platform,
           )) ||
@@ -718,13 +735,15 @@ export class SafeLaunchCoordinator {
         }
       } else {
         const reconciled = await this.reconcilePending(
-          profile,
           pending,
           listed.value,
           existingBinding,
         );
         if (reconciled !== undefined) return reconciled;
-        await this.options.bindings.clearPendingLaunch(profileId, pending);
+        await this.options.bindings.clearPendingLaunch(
+          bindingProfileId,
+          pending,
+        );
       }
     }
 
@@ -832,11 +851,11 @@ export class SafeLaunchCoordinator {
     }
 
     const createdAt = this.now().toISOString();
-    const uniqueLaunchName = `dc-${profileId.slice(-12)}-${this.uniqueId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24)}`;
+    const uniqueLaunchName = `dc-${bindingProfileId.slice(-12)}-${this.uniqueId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24)}`;
     const pendingLaunch: PendingLaunchRecord = {
       providerId: this.options.provider.providerId,
       workspaceId: this.options.workspace.id,
-      profileId,
+      profileId: bindingProfileId,
       uniqueLaunchName,
       agentName: definition.agentName,
       catalogId: definition.catalogId,
@@ -891,7 +910,7 @@ export class SafeLaunchCoordinator {
     ) {
       try {
         await this.options.bindings.clearPendingLaunch(
-          profileId,
+          bindingProfileId,
           pendingLaunch,
         );
       } catch (error) {
@@ -939,7 +958,6 @@ export class SafeLaunchCoordinator {
         const after = await this.options.provider.listSessions({ all: true });
         if (after.ok) {
           const recovered = await this.reconcilePending(
-            profile,
             pendingLaunch,
             after.value,
             existingBinding,
@@ -955,7 +973,7 @@ export class SafeLaunchCoordinator {
         );
       }
       await this.options.bindings
-        .clearPendingLaunch(profileId, pendingLaunch)
+        .clearPendingLaunch(bindingProfileId, pendingLaunch)
         .catch(() => undefined);
       return result;
     }
@@ -973,7 +991,7 @@ export class SafeLaunchCoordinator {
           `The rejected-substitution journal was retained for safe review (${rejected.uniqueLaunchName}).`;
       } else {
         await this.options.bindings
-          .clearPendingLaunch(profileId, pendingLaunch)
+          .clearPendingLaunch(bindingProfileId, pendingLaunch)
           .catch(() => undefined);
       }
       await this.options.refresh().catch(() => undefined);
@@ -1037,7 +1055,7 @@ export class SafeLaunchCoordinator {
     ) {
       const cleanup = await this.options.provider.stopSession(result.value.id);
       await this.options.bindings
-        .clearPendingLaunch(profileId, pendingLaunch)
+        .clearPendingLaunch(bindingProfileId, pendingLaunch)
         .catch(() => undefined);
       await this.options.refresh().catch(() => undefined);
       return failure(
@@ -1052,7 +1070,7 @@ export class SafeLaunchCoordinator {
     const binding: SessionBindingRecord = {
       providerId: this.options.provider.providerId,
       workspaceId: this.options.workspace.id,
-      profileId,
+      profileId: bindingProfileId,
       shortSessionId: result.value.id,
       ...(acknowledged?.sessionId === undefined
         ? {}
@@ -1086,7 +1104,7 @@ export class SafeLaunchCoordinator {
       let journalMessage = 'cleared the pending launch journal';
       try {
         await this.options.bindings.clearPendingLaunch(
-          profileId,
+          bindingProfileId,
           pendingLaunch,
         );
       } catch (journalError) {
@@ -1114,7 +1132,6 @@ export class SafeLaunchCoordinator {
    * Zero matches is conclusive for a retry; multiple matches remain blocked.
    */
   private async reconcilePending(
-    profile: RosterMember,
     pending: PendingLaunchRecord,
     sessions: readonly Session[],
     expectedExisting: SessionBindingRecord | undefined,
@@ -1137,7 +1154,7 @@ export class SafeLaunchCoordinator {
     const binding: SessionBindingRecord = {
       providerId: this.options.provider.providerId,
       workspaceId: pending.workspaceId,
-      profileId: profile.key,
+      profileId: pending.profileId,
       shortSessionId,
       ...(session.sessionId === undefined ? {} : { fullSessionId: session.sessionId }),
       uniqueLaunchName: pending.uniqueLaunchName,

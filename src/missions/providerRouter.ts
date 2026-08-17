@@ -19,6 +19,7 @@ import type {
   SessionBindingStore,
 } from '../supervisor/sessionBindings.js';
 import type { MissionProviderPort } from './coordinator.js';
+import { claudeMissionBindingProfileId } from './claudeBindingIdentity.js';
 import { MAX_PREVIEW_ROLE_INSTRUCTIONS } from './types.js';
 
 const CONTROL = /[\u0000\u0008\u000b\u000c\u000e-\u001f\u007f]/;
@@ -41,6 +42,7 @@ export interface ClaudeMissionLauncher {
     taskPrompt: string,
     launchCwd: string,
     accessMode: CouncilAccessMode,
+    bindingProfileId: string,
   ): Promise<CliResult<StartSessionOutcome>>;
 }
 
@@ -105,10 +107,19 @@ function safePrompt(value: string, name: string): string {
 }
 
 function normalizeRoleInstructions(value: string): string {
-  return safePrompt(
-    value.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'),
-    'Role instructions',
-  );
+  const normalized = value
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n');
+  if (
+    normalized.trim() === '' ||
+    normalized.length > 250_000 ||
+    CONTROL.test(normalized)
+  ) {
+    throw new Error(
+      'Role instructions are empty, oversized, or contain unsafe control bytes.',
+    );
+  }
+  return normalized;
 }
 
 function fingerprintRoleInstructions(value: string): string {
@@ -215,24 +226,36 @@ export class MissionProviderRouter implements MissionProviderPort {
           launchable = false;
           diagnostic = `Claude session bindings are unavailable: ${claude.bindings.problem.message}`;
         } else {
-          const binding = claude.bindings.getBinding(
-            request.profileId,
-          );
-          const pending = claude.bindings.getPendingLaunch(
-            request.profileId,
-          );
+          const bindingProfileId =
+            request.executionId === undefined
+              ? undefined
+              : this.claudeBindingProfileId(request);
+          const binding =
+            bindingProfileId === undefined
+              ? undefined
+              : claude.bindings.getBinding(bindingProfileId);
+          const pending =
+            bindingProfileId === undefined
+              ? undefined
+              : claude.bindings.getPendingLaunch(bindingProfileId);
           if (binding !== undefined || pending !== undefined) {
             if (
               (binding !== undefined &&
-                matchesMissionBinding(binding, request)) ||
+                matchesMissionBinding(binding, {
+                  ...request,
+                  profileId: bindingProfileId!,
+                })) ||
               (pending !== undefined &&
-                matchesMissionBinding(pending, request))
+                matchesMissionBinding(pending, {
+                  ...request,
+                  profileId: bindingProfileId!,
+                }))
             ) {
               action = 'reuse';
             } else {
               launchable = false;
               diagnostic =
-                'This Claude profile is owned by a different binding or pending launch. Existing non-Mission bindings cannot be claimed by a Mission.';
+                'This Mission execution has a conflicting Claude binding or pending launch.';
             }
           }
         }
@@ -348,6 +371,17 @@ export class MissionProviderRouter implements MissionProviderPort {
           claude?.diagnostic?.() ?? 'Claude Code is unavailable.',
         );
       }
+      await claude.bindings.reload();
+      if (claude.bindings.problem !== undefined) {
+        throw new Error(
+          `Claude session bindings are unavailable: ${claude.bindings.problem.message}`,
+        );
+      }
+      const bindingProfileId = this.claudeBindingProfileId({
+        ...request,
+        accessMode:
+          request.lease === undefined ? 'read-only' : 'workspace-write',
+      });
       const started = await claude.launcher.startMissionMember(
         request.profileId,
         request.executionId,
@@ -355,15 +389,16 @@ export class MissionProviderRouter implements MissionProviderPort {
         taskPrompt,
         launchCwd,
         request.lease === undefined ? 'read-only' : 'workspace-write',
+        bindingProfileId,
       );
       if (!started.ok) throw new Error(started.message);
       await claude.bindings.reload();
-      const binding = claude.bindings.getBinding(request.profileId);
+      const binding = claude.bindings.getBinding(bindingProfileId);
       if (
         binding === undefined ||
         binding.shortSessionId !== started.value.id ||
         binding.workspaceId !== request.workspaceId ||
-        binding.profileId !== request.profileId ||
+        binding.profileId !== bindingProfileId ||
         binding.missionExecutionId !== request.executionId ||
         binding.missionAccessMode !==
           (request.lease === undefined
@@ -476,6 +511,33 @@ export class MissionProviderRouter implements MissionProviderPort {
     if (workspaceId !== this.options.workspace.id) {
       throw new Error('Mission provider request belongs to another workspace.');
     }
+  }
+
+  private claudeBindingProfileId(request: {
+    readonly workspaceId: string;
+    readonly profileId: string;
+    readonly executionId?: string | undefined;
+    readonly accessMode: MissionBindingAccessMode;
+    readonly expectedDefinitionFingerprint: string;
+  }): string {
+    if (request.executionId === undefined) return request.profileId;
+    const claude = this.options.claude;
+    if (claude !== undefined) {
+      const legacyBinding = claude.bindings.getBinding(request.profileId);
+      const legacyPending = claude.bindings.getPendingLaunch(
+        request.profileId,
+      );
+      if (
+        legacyBinding?.missionExecutionId === request.executionId ||
+        legacyPending?.missionExecutionId === request.executionId
+      ) {
+        return request.profileId;
+      }
+    }
+    return claudeMissionBindingProfileId(
+      request.workspaceId,
+      request.executionId,
+    );
   }
 
   private providerId(value: string): CouncilProviderId {

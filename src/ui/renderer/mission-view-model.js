@@ -55,7 +55,7 @@
           participant.protocolReady === true &&
           typeof participant.roleInstructions === 'string' &&
           participant.roleInstructions.length > 0 &&
-          participant.roleInstructions.length <= 24_000 &&
+          participant.roleInstructions.length <= 100_000 &&
           /^[0-9a-f]{64}$/.test(
             participant.roleInstructionFingerprint ?? '',
           ),

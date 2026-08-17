@@ -188,6 +188,25 @@ describe('MissionProviderRouter Codex retry authority', () => {
     expect(preview.roleInstructionFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('previews a complete long-form role definition used by repository agents', async () => {
+    const roleInstructions = 'Long-form role guidance.\n'.repeat(1_500);
+    const f = await fixture('started', roleInstructions);
+
+    const preview = await f.router.previewStart({
+      missionId: 'mission-000001',
+      taskId: 'task-000001',
+      workspaceId: 'workspace-000001',
+      profileId: 'profile-00000001',
+      providerId: 'codex',
+      expectedDefinitionFingerprint: 'a'.repeat(64),
+      accessMode: 'read-only',
+    });
+
+    expect(roleInstructions.length).toBeGreaterThan(24_000);
+    expect(preview.roleInstructions).toBe(roleInstructions);
+    expect(preview.launchable).toBe(true);
+  });
+
   it('dispatches the initial task when a resumed thread has no durable task turn', async () => {
     const f = await fixture('not-started');
 
@@ -241,7 +260,7 @@ describe('MissionProviderRouter Claude ownership preview', () => {
     lastConfirmedAt: '2026-07-26T12:00:00.000Z',
   };
 
-  it('keeps a readable Milestone 1 binding outside Mission launch authority', async () => {
+  it('leaves an ordinary office binding intact and gives Mission a separate owner', async () => {
     const router = await claudePreviewFixture(legacyBinding);
 
     const preview = await router.previewStart({
@@ -255,8 +274,8 @@ describe('MissionProviderRouter Claude ownership preview', () => {
       accessMode: 'read-only',
     });
 
-    expect(preview.launchable).toBe(false);
-    expect(preview.diagnostic).toContain('cannot be claimed');
+    expect(preview).toMatchObject({ action: 'start', launchable: true });
+    expect(preview.diagnostic).toBeUndefined();
   });
 
   it('offers reuse only for the exact execution and access-mode binding', async () => {

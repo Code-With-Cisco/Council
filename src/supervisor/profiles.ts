@@ -191,6 +191,9 @@ function durableIdentityValidation(
       : validation(entry, binding.agentName);
   const kind = generatedProfileKind(binding.profileId);
   if (kind === undefined) return base;
+  if (binding.profileId.startsWith('profile-internal-mission-')) {
+    return base;
+  }
   const matchingProfileIds = new Set(
     durableRecords
       .filter(

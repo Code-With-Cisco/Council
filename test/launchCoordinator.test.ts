@@ -278,6 +278,46 @@ describe('SafeLaunchCoordinator', () => {
     expect(f.starts).not.toHaveBeenCalled();
   });
 
+  it('starts a Mission conversation without replacing the ordinary office binding', async () => {
+    const f = await fixture();
+    const office = boundRecord(
+      f.profile,
+      'office-session',
+      f.profile.cwd,
+    );
+    f.sessions.push(
+      session(
+        office.shortSessionId,
+        office.uniqueLaunchName,
+        f.profile.cwd,
+      ),
+    );
+    await f.store.setBinding(office);
+    const missionBindingProfileId =
+      'profile-internal-mission-12345678';
+
+    const result = await f.coordinator.startProfile(f.profile.key, {
+      bindingProfileId: missionBindingProfileId,
+      rejectExisting: true,
+      promptOverride: 'Complete only this Mission assignment.',
+      expectedDefinitionFingerprint: fingerprint,
+      launchCwd: f.profile.cwd,
+      missionExecutionId: 'execution-000001',
+      missionAccessMode: 'read-only',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(f.store.getBinding(f.profile.key)).toEqual(office);
+    expect(
+      f.store.getBinding(missionBindingProfileId),
+    ).toMatchObject({
+      profileId: missionBindingProfileId,
+      missionExecutionId: 'execution-000001',
+      shortSessionId: 'start001',
+    });
+    expect(f.starts).toHaveBeenCalledOnce();
+  });
+
   it('blocks an unknown profile and a fingerprint change before spawn', async () => {
     const f = await fixture({ profile: { definitionFingerprint: 'b'.repeat(64) } });
     expect((await f.coordinator.startProfile('profile-unknown')).ok).toBe(false);

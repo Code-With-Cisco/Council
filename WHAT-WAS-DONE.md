@@ -282,3 +282,48 @@ Implemented on 2026-08-16 from the next installed-app test pass:
 - Built local installer `release/Decagram Council Setup 0.2.2.exe`; SHA-256
   `88C397B306019C3A511D3DD67AEA00E170AAC007F540F864AD647C70904C39CE`.
 - No commit, push, tag, or release was performed for this repair.
+
+## Mission Start Squad ownership and long-role repair
+
+Implemented on 2026-08-17 after the installed Start Squad preview reported
+that the PRD Lead definition exceeded 24,000 characters and that active
+Test/Review office profiles could not be claimed by a Mission:
+
+- Replaced the shared office/Mission Claude binding identity with a stable,
+  execution-scoped hidden binding. Starting a Mission no longer overwrites,
+  stops, resumes, or claims the ordinary conversation attached to the visible
+  Builder, PRD Lead, Test Engineer, or Reviewer station.
+- Kept the source role profile authoritative for catalog and fingerprint
+  validation while storing provider session ownership under the hidden Mission
+  identity. The identity is derived from the exact workspace and Mission
+  execution, so retries resolve the same binding without crossing workspaces.
+- Preserved exact legacy Mission bindings created by earlier builds. A legacy
+  execution can still be reused, but an ordinary or different-execution binding
+  is left untouched.
+- Kept pending-launch journaling, uncertain-acknowledgement reconciliation, and
+  rejected-agent cleanup on the same Mission-scoped identity. Recovered Mission
+  records remain hidden internal profiles after restart.
+- Raised the complete Start Squad role-preview contract from 24,000 to 100,000
+  characters. This admits the repository's 34 KB PRD Lead definition while
+  retaining full preview/fingerprint consent and a hard oversized-role blocker.
+- Bumped the local repair build from 0.2.2 to 0.2.3. Nothing was published.
+
+### Mission preview repair verification
+
+- TypeScript typecheck passed.
+- Full suite: 50 files, 446 tests, 0 failures.
+- Regression coverage proves that an active ordinary office binding survives a
+  Mission launch unchanged, long-form definitions over 24,000 characters
+  preview completely, oversized definitions remain blocked, exact legacy
+  Mission retries remain compatible, and restart recovery keeps Mission
+  profiles hidden.
+- Production build passed and `npm audit --omit=dev` reported 0 vulnerabilities.
+- Combined x64/ARM64 NSIS packaging passed. The packaged `app.asar` reports
+  version 0.2.3 and contains both the Mission-scoped binding implementation and
+  the 100,000-character renderer contract. The external packaged guard
+  self-test also passed.
+- Built local installer `release/Decagram Council Setup 0.2.3.exe`; SHA-256
+  `DDDC12EAAE505BE8BC6371B7CB3CE949C554484E2B7E734BC9A12C2A9A855059`.
+- A live installed-app Mission launch remains for user verification; automated
+  checks do not claim that interaction.
+- No commit, push, tag, release, or installation was performed for this repair.

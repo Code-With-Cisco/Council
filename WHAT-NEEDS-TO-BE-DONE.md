@@ -1,13 +1,13 @@
 # What needs to be done
 
-Action plan updated 2026-08-16 from testing the installed Windows application.
+Action plan updated 2026-08-17 from testing the installed Windows application.
 Work in this document is ordered by user impact and dependency. Do not begin
 multi-window or distribution work until the existing session, Mission, and
 diagnostic paths are observable and reliable.
 
 ## Implementation status after the repair pass
 
-Implemented in the uncommitted working tree on 2026-08-16:
+Implemented across local repair passes through 2026-08-17:
 
 - structured Mission failures, correlation IDs, redacted bounded journal, and
   visible Refresh changed/unchanged status;
@@ -25,10 +25,14 @@ Implemented in the uncommitted working tree on 2026-08-16:
 - packaged guard scripts outside `app.asar`, packaged-resource resolution, and
   Windows PowerShell 5.1-compatible guard self-test canary handling; and
 - no-release-aware update checks, complete packaged Agent Pack resources, and
-  direct-message PTY launches pinned to the exact bound repository.
+  direct-message PTY launches pinned to the exact bound repository; and
+- Mission-scoped Claude bindings that do not claim or replace ordinary office
+  conversations, plus complete Start Squad previews for long-form role
+  definitions up to the provider-safe 100,000-character contract.
 
-Automated verification is green (`npx tsc --noEmit`, 50 test files / 443 tests,
-build, x64 NSIS packaging, and a clean production dependency audit). The
+Automated verification is green (`npx tsc --noEmit`, 50 test files / 446 tests,
+build, combined x64/ARM64 NSIS packaging, and a clean production dependency
+audit). The
 following work remains and must not be
 treated as verified or complete:
 
@@ -48,9 +52,10 @@ treated as verified or complete:
 - configure consistent Authenticode signing, publish two incrementing test
   versions, and perform an installed-app update/download/install/relaunch test;
   and
-- install the local 0.2.2 bugfix over the currently installed build and confirm
-  update check reports **No published app update**, Agent Pack preview opens in
-  a switched repository, and an idle agent accepts a direct message; and
+- install the local 0.2.3 bugfix over the currently installed build and confirm
+  the PRD Lead's long-form definition previews completely, already-running
+  Test/Review office conversations do not block Start Squad, and a minimal
+  Claude Mission launches while those ordinary conversations remain bound; and
 - after review, publish an incremented release so the installed application can
   exercise the real download/install/relaunch path; and
 - keep concurrent windows blocked until every IPC request carries and validates

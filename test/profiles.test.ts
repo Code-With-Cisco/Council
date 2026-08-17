@@ -609,6 +609,37 @@ describe('resolveProfiles', () => {
     });
   });
 
+  it('recovers a Mission-scoped binding as a hidden internal profile', () => {
+    const missionProfileId =
+      'profile-internal-mission-12345678';
+    const secondMissionProfileId =
+      'profile-internal-mission-87654321';
+    const resolved = resolveProfiles(
+      { version: 2, members: [], pollIntervalMs: 10_000 },
+      catalog([entry('builder')]),
+      [
+        binding(missionProfileId, 'builder', 'catalog_builder'),
+        binding(secondMissionProfileId, 'builder', 'catalog_builder'),
+      ],
+    );
+
+    expect(
+      resolved.config.members.find(
+        (member) => member.key === missionProfileId,
+      ),
+    ).toMatchObject({
+      agent: 'builder',
+      mode: 'internal',
+      visible: false,
+    });
+    expect(
+      resolved.validations.get(missionProfileId)?.launchable,
+    ).toBe(true);
+    expect(
+      resolved.validations.get(secondMissionProfileId)?.launchable,
+    ).toBe(true);
+  });
+
   it('does not substitute a same-named definition for a recovered durable catalog identity', () => {
     const recoveredId = 'profile-virtual-identity-missing';
     const resolved = resolveProfiles(

@@ -26,6 +26,7 @@ import type {
   ClaudeRuntimeReader,
 } from '../providers/contracts.js';
 import type { CouncilAccessMode } from '../providers/missionContracts.js';
+import { claudeMissionBindingProfileId } from '../missions/claudeBindingIdentity.js';
 import type { ResolvedAgentCatalog } from './catalog.js';
 import {
   SafeLaunchCoordinator,
@@ -232,7 +233,20 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
     taskPrompt: string,
     launchCwd: string,
     accessMode: CouncilAccessMode,
+    bindingProfileId: string,
   ): Promise<CliResult<StartSessionOutcome>> {
+    const scopedBindingProfileId = claudeMissionBindingProfileId(
+      this.options.workspace.id,
+      missionExecutionId,
+    );
+    if (
+      bindingProfileId !== profileId &&
+      bindingProfileId !== scopedBindingProfileId
+    ) {
+      return Promise.resolve(
+        domainFailure('The Mission binding owner is not authorized.'),
+      );
+    }
     return this.trackResult(() =>
       this.launchCoordinator.startProfile(profileId, {
         rejectExisting: true,
@@ -241,6 +255,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
         launchCwd,
         missionExecutionId,
         missionAccessMode: accessMode,
+        bindingProfileId,
         ...(accessMode === 'read-only'
           ? { permissionModeOverride: 'plan' as const }
           : {}),
