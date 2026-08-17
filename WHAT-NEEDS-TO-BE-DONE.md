@@ -23,9 +23,11 @@ Implemented in the uncommitted working tree on 2026-08-16:
 - manual in-app Windows update check, download progress, confirmed install, and
   orderly relaunch, plus a tag-only draft GitHub Release workflow; and
 - packaged guard scripts outside `app.asar`, packaged-resource resolution, and
-  Windows PowerShell 5.1-compatible guard self-test canary handling.
+  Windows PowerShell 5.1-compatible guard self-test canary handling; and
+- no-release-aware update checks, complete packaged Agent Pack resources, and
+  direct-message PTY launches pinned to the exact bound repository.
 
-Automated verification is green (`npx tsc --noEmit`, 49 test files / 437 tests,
+Automated verification is green (`npx tsc --noEmit`, 50 test files / 443 tests,
 build, x64 NSIS packaging, and a clean production dependency audit). The
 following work remains and must not be
 treated as verified or complete:
@@ -46,9 +48,11 @@ treated as verified or complete:
 - configure consistent Authenticode signing, publish two incrementing test
   versions, and perform an installed-app update/download/install/relaunch test;
   and
-- install the local 0.2.1 bugfix over the currently installed build and confirm
-  the Diagnostics card passes, or publish a reviewed `v0.2.1` release so an
-  installed 0.2.0 can exercise the in-app update path; and
+- install the local 0.2.2 bugfix over the currently installed build and confirm
+  update check reports **No published app update**, Agent Pack preview opens in
+  a switched repository, and an idle agent accepts a direct message; and
+- after review, publish an incremented release so the installed application can
+  exercise the real download/install/relaunch path; and
 - keep concurrent windows blocked until every IPC request carries and validates
   an exact workspace ID and runtime-registry isolation tests pass.
 
@@ -394,8 +398,6 @@ Run this matrix after Phases 0–3 are green:
 
 ## External evidence still outstanding
 
-- Capture the exact recovery text from a naturally wedged supervisor and then
-  tighten the defensive PID extraction. Do not corrupt user state to force it.
 - Verify cross-session `SendMessage` behavior on Windows with two independent
   sessions.
 - Capture fresh experimental team/task file shapes if those parsers remain part

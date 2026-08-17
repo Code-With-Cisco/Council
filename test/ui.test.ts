@@ -175,6 +175,7 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('api.checkForUpdates()');
     expect(renderer).toContain('api.downloadUpdate()');
     expect(renderer).toContain('api.installUpdate()');
+    expect(renderer).toContain('Supervisor unreachable');
     expect(
       renderer.match(
         /DecagramCouncilSceneViewModel\.invokeProfileStart\(slot, profileActions\)/g,

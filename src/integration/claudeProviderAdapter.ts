@@ -16,6 +16,7 @@ import type {
   AgentProviderAdapter,
   AgentProviderCapabilities,
   ClaudeRuntimeReader,
+  ReplyContext,
 } from '../providers/contracts.js';
 import { CLAUDE_CODE_PROVIDER_ID } from '../supervisor/sessionBindings.js';
 
@@ -86,8 +87,11 @@ export class ClaudeProviderAdapter
   sendReply(
     providerSessionId: string,
     message: string,
+    context: ReplyContext = {},
   ): Promise<CliResult<ReplyOutcome>> {
-    return this.replyTransport(this.client.cli.bin, providerSessionId, message);
+    return this.replyTransport(this.client.cli.bin, providerSessionId, message, {
+      cwd: context.cwd,
+    });
   }
 
   daemonStatus(): Promise<CliResult<DaemonStatus>> {

@@ -15,6 +15,7 @@ import type {
   AgentValidation,
   CliFailure,
   CliResult,
+  DaemonStatus,
   ParseProblem,
   RosterConfig,
   Session,
@@ -75,6 +76,10 @@ export function isSafePlainTextReplyState(session: Session | undefined): boolean
   if (session.state === 'done' || session.state === 'failed') return true;
   if (session.state === 'working' && session.status?.toLowerCase() === 'idle') return true;
   return session.state === 'blocked' && session.waitingFor === 'input needed';
+}
+
+export function isDaemonControlWedged(status: DaemonStatus): boolean {
+  return status.running && !status.controlSocketReachable;
 }
 
 /**
@@ -318,7 +323,17 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
               ['attach', session.id!],
             );
           }
-          return this.options.provider.sendReply(session.id!, message);
+          const daemon = await this.options.provider.daemonStatus();
+          if (!daemon.ok) return daemon;
+          if (isDaemonControlWedged(daemon.value)) {
+            return domainFailure(
+              'The Claude supervisor is running but its control channel is unreachable. Open Diagnostics and run Restart supervisor safely before retrying; your message was not sent.',
+              ['daemon', 'status'],
+            );
+          }
+          return this.options.provider.sendReply(session.id!, message, {
+            cwd: session.cwd,
+          });
         },
       });
     });

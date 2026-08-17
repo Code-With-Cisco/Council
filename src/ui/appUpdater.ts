@@ -61,6 +61,51 @@ function boundedPercent(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
 }
 
+interface UpdateErrorLike {
+  readonly code?: unknown;
+  readonly message?: unknown;
+}
+
+function updateFailure(error: unknown): Pick<AppUpdateState, 'status' | 'message'> {
+  const candidate = error as UpdateErrorLike;
+  const code = typeof candidate?.code === 'string' ? candidate.code : '';
+  const message = error instanceof Error
+    ? error.message
+    : typeof candidate?.message === 'string'
+      ? candidate.message
+      : String(error);
+
+  if (
+    code === 'ERR_UPDATER_NO_PUBLISHED_VERSIONS' ||
+    (code === 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND' && /\b404\b|not found/i.test(message)) ||
+    /no published versions on github/i.test(message)
+  ) {
+    return {
+      status: 'not-available',
+      message: 'No published app update is available yet. Updates will appear after a reviewed GitHub Release is published.',
+    };
+  }
+  if (
+    code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' ||
+    /cannot find (?:latest|beta|alpha)\.yml/i.test(message)
+  ) {
+    return {
+      status: 'error',
+      message: 'The latest published release is missing its Windows update metadata. Review the release assets and try again.',
+    };
+  }
+  if (/ENOTFOUND|ECONN(?:REFUSED|RESET)|ETIMEDOUT|ERR_INTERNET_DISCONNECTED|net::/i.test(message)) {
+    return {
+      status: 'error',
+      message: 'Council could not reach GitHub Releases. Check your internet connection and try again.',
+    };
+  }
+  return {
+    status: 'error',
+    message: 'The update check could not read the published release information. Try again or review the release configuration.',
+  };
+}
+
 /** Manual, renderer-safe state machine around electron-updater. */
 export class AppUpdateController {
   private readonly now: () => Date;
@@ -127,11 +172,10 @@ export class AppUpdateController {
         message: `Version ${info.version} is ready to install and relaunch.`,
       });
     });
-    updater.on('error', () => {
+    updater.on('error', (error) => {
       this.setState({
-        status: 'error',
+        ...updateFailure(error),
         progress: undefined,
-        message: 'The update action failed. Check your internet connection and try again.',
       });
     });
   }
@@ -178,11 +222,10 @@ export class AppUpdateController {
 
   private run(action: () => Promise<AppUpdateState>): Promise<AppUpdateState> {
     const operation = action()
-      .catch(() => {
+      .catch((error: unknown) => {
         this.setState({
-          status: 'error',
+          ...updateFailure(error),
           progress: undefined,
-          message: 'The update action failed. Check your internet connection and try again.',
         });
         return this.stateValue;
       })

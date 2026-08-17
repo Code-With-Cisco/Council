@@ -8,6 +8,13 @@ import { AgentPackInstaller } from '../src/ui/agentPack.js';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('repository Agent Pack', () => {
+  it('includes every non-script Agent Pack resource in the packaged app', async () => {
+    const packageDocument = JSON.parse(
+      await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'),
+    ) as { build?: { files?: unknown[] } };
+    expect(packageDocument.build?.files).toContain('scripts/gates/README.md');
+  });
+
   it('previews, confirms by exact preview, and installs without replacing settings', async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), 'council-pack-'));
     await mkdir(path.join(workspace, '.claude'), { recursive: true });

@@ -5,6 +5,7 @@ import { ClaudePaths } from '../src/integration/paths.js';
 import type { Session } from '../src/integration/types.js';
 import {
   ClaudeCodeAgentSupervisor,
+  isDaemonControlWedged,
   isSafePlainTextReplyState,
 } from '../src/supervisor/agentSupervisor.js';
 import type { ResolvedAgentCatalog } from '../src/supervisor/catalog.js';
@@ -105,6 +106,17 @@ describe('ClaudeCodeAgentSupervisor', () => {
     expect(
       isSafePlainTextReplyState({ ...waiting, state: 'working', status: 'idle' } as Session),
     ).toBe(true);
+  });
+
+  it('recognizes a running supervisor with an unreachable control pipe as wedged', () => {
+    expect(isDaemonControlWedged({
+      running: true,
+      controlSocketReachable: false,
+    } as import('../src/integration/types.js').DaemonStatus)).toBe(true);
+    expect(isDaemonControlWedged({
+      running: false,
+      controlSocketReachable: false,
+    } as import('../src/integration/types.js').DaemonStatus)).toBe(false);
   });
 
   it('rejects unknown profile and session ids before invoking the CLI', async () => {

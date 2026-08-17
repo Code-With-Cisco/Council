@@ -237,3 +237,48 @@ Implemented on 2026-08-16 after the installed app reported exit
 - Built local installer `release/Decagram Council Setup 0.2.1.exe`; SHA-256
   `CB09823077E7AB83B11B63D98C3CAEEB9FD5FA53AD1E13A049ED2BAD60D3A254`.
 - No commit or push was performed for this repair.
+
+## Installed-app update, Agent Pack, and direct-message repair
+
+Implemented on 2026-08-16 from the next installed-app test pass:
+
+- Confirmed the public GitHub latest-release endpoint returns 404 because the
+  repository has no published release. Update checks now report that no
+  published update is available instead of blaming the internet connection.
+  Missing `latest.yml` and genuine network failures retain separate actionable
+  messages.
+- Added the Agent Pack's required `scripts/gates/README.md` to the packaged app.
+  The previous installer included the PowerShell scripts but omitted this
+  non-script resource, causing every switched-repository preview to fail before
+  conflict checks could run.
+- Stabilized a PATH-discovered Claude command to an absolute executable path.
+- Passed the exact provider-owned session repository into the PTY direct-message
+  transport. This avoids Windows `File not found` when an installer/relaunch
+  leaves the GUI process with a temporary or stale working directory.
+- Added a direct-message supervisor reachability gate. A running process with
+  an unreachable control pipe is now shown as **Supervisor unreachable**, and
+  messaging directs the user to safe recovery without sending their text.
+- Captured Claude 2.1.233's real wedged-supervisor recovery text and extended
+  PID parsing for its `pid=<number>` form, allowing Diagnostics to display the
+  exact `taskkill /PID <number> /F` recovery command.
+- Replaced the opaque PTY `File not found` text with an actionable message that
+  explicitly says the user's message was not sent.
+- Bumped the local bugfix build from 0.2.1 to 0.2.2. Nothing was published.
+
+### Three-bug repair verification
+
+- TypeScript typecheck passed.
+- Full suite: 50 files, 443 tests, 0 failures.
+- Focused tests cover no published release, malformed release metadata,
+  packaged Agent Pack README inclusion, absolute Claude PATH resolution, exact
+  PTY working-directory delegation, and actionable PTY launch failure text.
+- The official GitHub API probe returned 404 for the latest-release endpoint,
+  confirming the update UI encountered absent release state rather than a local
+  connectivity failure.
+- x64 NSIS packaging passed. The artifact contains the Agent Pack README,
+  retains the external passing guard self-test, and launches the discovered
+  Claude 2.1.233 executable through the packaged PTY with the Council repository
+  as its working directory.
+- Built local installer `release/Decagram Council Setup 0.2.2.exe`; SHA-256
+  `88C397B306019C3A511D3DD67AEA00E170AAC007F540F864AD647C70904C39CE`.
+- No commit, push, tag, or release was performed for this repair.

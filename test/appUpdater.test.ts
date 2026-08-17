@@ -105,4 +105,42 @@ describe('AppUpdateController', () => {
     expect(state.message).not.toContain('secret');
     expect(state.message).not.toContain('private');
   });
+
+  it('treats a missing published GitHub release as no update instead of a network failure', async () => {
+    const updater = new FakeUpdater();
+    updater.checkForUpdates = async () => {
+      throw Object.assign(
+        new Error('Unable to find latest version on GitHub: HttpError: 404 Not Found'),
+        { code: 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND' },
+      );
+    };
+    const controller = new AppUpdateController({
+      updater,
+      currentVersion: '0.2.2',
+      enabled: true,
+    });
+
+    const state = await controller.check();
+    expect(state.status).toBe('not-available');
+    expect(state.message).toContain('No published app update');
+    expect(state.message).not.toContain('internet connection');
+  });
+
+  it('distinguishes a malformed published release from no release', async () => {
+    const updater = new FakeUpdater();
+    updater.checkForUpdates = async () => {
+      throw Object.assign(new Error('Cannot find latest.yml in the latest release artifacts'), {
+        code: 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND',
+      });
+    };
+    const controller = new AppUpdateController({
+      updater,
+      currentVersion: '0.2.2',
+      enabled: true,
+    });
+
+    const state = await controller.check();
+    expect(state.status).toBe('error');
+    expect(state.message).toContain('missing its Windows update metadata');
+  });
 });

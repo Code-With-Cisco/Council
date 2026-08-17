@@ -87,7 +87,7 @@ describe('ClaudeProviderAdapter', () => {
     expect(await adapter.stopSession('session-1')).toBe(stopResult);
     expect(await adapter.resumeSession('session-1')).toBe(resumeResult);
     expect(await adapter.readLogs('session-1')).toBe(logsResult);
-    expect(await adapter.sendReply('session-1', 'Continue.')).toBe(replyResult);
+    expect(await adapter.sendReply('session-1', 'Continue.', { cwd: '/work' })).toBe(replyResult);
     expect(await adapter.daemonStatus()).toBe(daemonResult);
 
     expect(adapter.providerId).toBe('claude-code');
@@ -107,6 +107,7 @@ describe('ClaudeProviderAdapter', () => {
       'claude.exe',
       'session-1',
       'Continue.',
+      { cwd: '/work' },
     );
   });
 

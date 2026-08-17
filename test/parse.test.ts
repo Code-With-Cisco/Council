@@ -215,12 +215,10 @@ describe('parseDaemonStatus', () => {
   });
 
   it('surfaces a pid to taskkill when the supervisor will not answer', () => {
-    // Defensive: this exact wording has not been captured from a real wedged
-    // supervisor, so the assertion covers the handling, not the phrasing.
     const outcome = parseDaemonStop(
-      'daemon did not respond; terminate it manually with taskkill /PID 4321 /F',
+      'supervisor (pid=11596) is still running — stop it with `taskkill /PID 11596` or close the terminal it was started in.',
     );
-    expect(outcome.manualKillPid).toBe(4321);
+    expect(outcome.manualKillPid).toBe(11596);
     expect(outcome.recognized).toBe(true);
   });
 

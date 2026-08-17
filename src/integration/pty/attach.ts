@@ -75,6 +75,13 @@ export interface AttachOptions {
   readonly env?: NodeJS.ProcessEnv | undefined;
 }
 
+export function describePtySpawnError(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  return /file not found/i.test(rawMessage)
+    ? 'The Claude terminal bridge could not start in the bound repository because Windows reported "File not found." Refresh Diagnostics and retry; the message was not sent.'
+    : rawMessage;
+}
+
 /**
  * A live `claude attach <id>` PTY.
  *
@@ -121,7 +128,7 @@ export class AttachSession {
       return {
         ok: false,
         kind: 'spawn-failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: describePtySpawnError(err),
         raw: '',
         argv,
         exitCode: null,

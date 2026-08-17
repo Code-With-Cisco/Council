@@ -2,6 +2,7 @@ export type {
   AgentProviderAdapter,
   AgentProviderCapabilities,
   ClaudeRuntimeReader,
+  ReplyContext,
 } from './contracts.js';
 export type {
   CouncilAccessMode,

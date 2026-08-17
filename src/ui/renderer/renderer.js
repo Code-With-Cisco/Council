@@ -1790,14 +1790,26 @@ function renderDiagnostics() {
     return;
   }
   const daemon = snapshot?.daemon ?? p.supervisor;
-  const daemonValue = !daemon ? 'Unavailable' : !daemon.recognized ? 'Unknown' : daemon.running ? 'Running' : 'Resting';
+  const daemonReachable = daemon?.controlSocketReachable ?? p.supervisor.reachable;
+  const daemonWedged = daemon?.running === true && daemonReachable === false;
+  const daemonValue = !daemon
+    ? 'Unavailable'
+    : !daemon.recognized
+      ? 'Unknown'
+      : daemonWedged
+        ? 'Unreachable'
+        : daemon.running
+          ? 'Running'
+          : 'Resting';
   const daemonTone = p.supervisor.versionMismatch
     ? 'is-bad'
     : !daemon || !daemon.recognized
       ? 'is-warning'
-      : daemon.running
-        ? 'is-good'
-        : '';
+      : daemonWedged
+        ? 'is-bad'
+        : daemon.running
+          ? 'is-good'
+          : '';
   const guard = p.guardSelfTest;
   const guardPassed = guard.status === 'passed';
   const claudeUsable = p.claude?.meetsMinimum === true;
@@ -1902,6 +1914,9 @@ function render() {
   } else if (!snapshot) {
     connection.textContent = 'Connecting…';
     connection.className = 'connection-pill is-warning';
+  } else if (snapshot.daemon?.running && !snapshot.daemon.controlSocketReachable) {
+    connection.textContent = 'Supervisor unreachable';
+    connection.className = 'connection-pill is-bad';
   } else {
     connection.textContent = snapshot.rosterError
       ? 'Roster stale'

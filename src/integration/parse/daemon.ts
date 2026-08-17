@@ -62,13 +62,11 @@ import type { DaemonStatus, DaemonStopOutcome } from '../types.js';
  *
  *   no daemon running
  *
- * The third case — a supervisor that does not answer, where the CLI reports a
- * pid to terminate manually — has NOT been observed here, because wedging a
- * supervisor on demand is not something this codebase can arrange. It is
- * handled defensively rather than precisely: any pid mentioned alongside
- * taskkill/kill wording is surfaced so the UI can offer it, and `raw` is always
- * retained so an unrecognised message is still readable. Do not tighten this
- * pattern against a guess; tighten it the first time a real one is captured.
+ * The third case — a supervisor process whose control pipe does not answer —
+ * was captured on Windows with `supervisor (pid=11596) is still running` and a
+ * `taskkill /PID 11596` instruction. Any pid mentioned alongside taskkill/kill
+ * wording is surfaced so the UI can offer it, and `raw` is always retained so
+ * an unrecognised message is still readable.
  */
 export function parseDaemonStop(raw: string): DaemonStopOutcome {
   const alreadyStopped = /^\s*no daemon running\s*$/im.test(raw);
@@ -76,7 +74,7 @@ export function parseDaemonStop(raw: string): DaemonStopOutcome {
 
   let manualKillPid: number | undefined;
   if (/taskkill|kill the process|terminate it manually/i.test(raw)) {
-    const match = /\b(?:pid|\/pid)\s*:?\s*(\d{1,10})\b/i.exec(raw);
+    const match = /\b(?:pid|\/pid)\s*[:=]?\s*(\d{1,10})\b/i.exec(raw);
     const parsed = match?.[1] === undefined ? Number.NaN : Number.parseInt(match[1], 10);
     if (!Number.isNaN(parsed)) manualKillPid = parsed;
   }

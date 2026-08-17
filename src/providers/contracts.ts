@@ -24,6 +24,11 @@ export interface AgentProviderCapabilities {
   readonly persistentSessions: boolean;
 }
 
+export interface ReplyContext {
+  /** Exact provider-owned session directory; never accepted from renderer IPC. */
+  readonly cwd?: string | undefined;
+}
+
 /**
  * Provider command boundary used by Council's ownership and launch
  * coordinators. The current normalized request/result/session shapes are kept
@@ -47,6 +52,7 @@ export interface AgentProviderAdapter<ProviderId extends string = string> {
   sendReply(
     providerSessionId: string,
     message: string,
+    context?: ReplyContext,
   ): Promise<CliResult<ReplyOutcome>>;
 }
 

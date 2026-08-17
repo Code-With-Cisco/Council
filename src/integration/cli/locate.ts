@@ -50,6 +50,36 @@ async function isExecutable(candidate: string): Promise<boolean> {
   }
 }
 
+function environmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const exact = env[name];
+  if (exact !== undefined) return exact;
+  const entry = Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase());
+  return entry?.[1];
+}
+
+/**
+ * Converts a PATH-discovered command into a stable absolute executable path.
+ * Native Windows PTY creation is less forgiving than child_process PATH lookup,
+ * and desktop processes may later observe a different working directory.
+ */
+export async function resolvePathExecutable(
+  executable: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  if (path.isAbsolute(executable) || executable.includes('/') || executable.includes('\\')) {
+    return executable;
+  }
+  const searchPath = environmentValue(env, 'PATH');
+  if (searchPath === undefined) return executable;
+  for (const rawDirectory of searchPath.split(path.delimiter)) {
+    const directory = rawDirectory.trim().replace(/^"|"$/g, '');
+    if (directory === '') continue;
+    const candidate = path.resolve(directory, executable);
+    if (await isExecutable(candidate)) return candidate;
+  }
+  return executable;
+}
+
 /** Directories the CLI installs itself into, ordered by how current they tend to be. */
 function wellKnownDirs(home: string, env: NodeJS.ProcessEnv): string[] {
   const dirs = [path.join(home, '.local', 'bin'), path.join(home, '.claude', 'local')];
@@ -164,7 +194,10 @@ export async function locateClaude(opts: LocateOptions = {}): Promise<LocatedCli
 
     const version = parseVersion(result.value);
     return {
-      bin: candidate.bin,
+      bin:
+        candidate.via === 'path'
+          ? await resolvePathExecutable(candidate.bin, env)
+          : candidate.bin,
       version,
       meetsMinimum: version === undefined || compareVersions(version, MINIMUM_CLAUDE_VERSION) >= 0,
       discoveredVia: candidate.via,

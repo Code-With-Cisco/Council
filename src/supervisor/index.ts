@@ -8,6 +8,7 @@ export type {
   AgentProviderAdapter,
   AgentProviderCapabilities,
   ClaudeRuntimeReader,
+  ReplyContext,
 } from '../providers/contracts.js';
 export { SafeLaunchCoordinator } from './launchCoordinator.js';
 export type {
