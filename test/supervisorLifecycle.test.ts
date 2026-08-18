@@ -539,7 +539,7 @@ describe('ClaudeCodeAgentSupervisor lifecycle actions', () => {
           workspaceRoot,
           action === 'reply' ? 'blocked' : 'working',
         ),
-        ...(action === 'reply' ? { waitingFor: 'input needed' as const } : {}),
+        ...(action === 'reply' ? { status: 'idle' as const } : {}),
       };
       const fake = lifecycleClient([exact]);
       const store = await bindingStore(workspaceRoot);

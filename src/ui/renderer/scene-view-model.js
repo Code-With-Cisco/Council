@@ -55,12 +55,17 @@
         slot.bindingState === 'active' &&
         hasExactSession,
       logs: workspaceReady && capabilities.logs === true && hasExactSession,
+      // Mirrors isSafePlainTextReplyState in src/supervisor/agentSupervisor.ts.
+      // A blocked session qualifies only when it is idle and names nothing it
+      // waits on: `waitingFor` is set exactly when a prompt or dialog owns the
+      // input, and plain text would answer that instead of the agent.
       reply:
         workspaceReady &&
         capabilities.plainTextReply === true &&
         hasExactSession &&
         ((slot.session.state === 'blocked' &&
-          slot.session.waitingFor === 'input needed') ||
+          slot.session.status?.toLowerCase() === 'idle' &&
+          slot.session.waitingFor === undefined) ||
           (slot.session.state === 'working' &&
             slot.session.status?.toLowerCase() === 'idle') ||
           slot.session.state === 'done' ||

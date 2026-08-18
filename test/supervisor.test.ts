@@ -81,23 +81,38 @@ describe('ClaudeCodeAgentSupervisor', () => {
   });
 
   it('allows ordinary input and resumable terminal replies but preserves an explicit stop', () => {
+    // Shape recorded from claude v2.1.234: an agent that has reported in and is
+    // awaiting instructions reports blocked/idle and omits waitingFor entirely.
     const waiting = {
       id: 'exact001',
       state: 'blocked',
-      waitingFor: 'input needed',
+      status: 'idle',
+      waitingFor: undefined,
     } as Session;
     expect(isSafePlainTextReplyState(waiting)).toBe(true);
+    // Same recording: a permission prompt is blocked/waiting and names itself.
+    // Plain text there would answer the prompt, so every named wait is refused.
     for (const waitingFor of [
       'permission prompt',
       'sandbox request',
       'worker request',
       'dialog open',
-      undefined,
+      'input needed',
     ]) {
+      expect(
+        isSafePlainTextReplyState({
+          ...waiting,
+          status: 'waiting',
+          waitingFor,
+        } as Session),
+      ).toBe(false);
       expect(
         isSafePlainTextReplyState({ ...waiting, waitingFor } as Session),
       ).toBe(false);
     }
+    expect(
+      isSafePlainTextReplyState({ ...waiting, status: 'waiting' } as Session),
+    ).toBe(false);
     expect(
       isSafePlainTextReplyState({ ...waiting, state: 'stopped' } as Session),
     ).toBe(false);

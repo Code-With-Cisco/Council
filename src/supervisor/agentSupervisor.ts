@@ -72,11 +72,31 @@ function domainFailure(message: string, argv: readonly string[] = []): CliFailur
   };
 }
 
+/**
+ * Whether a session can safely be handed a line of plain text.
+ *
+ * Re-verified against claude v2.1.234, because the earlier `waitingFor ===
+ * 'input needed'` test matched a value the CLI never emits. The roster
+ * actually distinguishes the two blocked cases like this:
+ *
+ *   awaiting instructions  state=blocked  status=idle     waitingFor absent
+ *   permission prompt      state=blocked  status=waiting  waitingFor='permission prompt'
+ *
+ * The distinction is the whole point of this guard: free text typed into a
+ * permission prompt answers the prompt, so a blocked session only qualifies
+ * when it is idle AND names nothing it is waiting on. An unrecognised
+ * `waitingFor` (dialog, sandbox request, worker request) stays excluded by the
+ * same rule.
+ *
+ * `stopped` stays excluded deliberately: that is what an explicit Stop records,
+ * and Resume is the honest way back.
+ */
 export function isSafePlainTextReplyState(session: Session | undefined): boolean {
   if (session?.id === undefined) return false;
   if (session.state === 'done' || session.state === 'failed') return true;
-  if (session.state === 'working' && session.status?.toLowerCase() === 'idle') return true;
-  return session.state === 'blocked' && session.waitingFor === 'input needed';
+  const idle = session.status?.toLowerCase() === 'idle';
+  if (session.state === 'working' && idle) return true;
+  return session.state === 'blocked' && idle && session.waitingFor === undefined;
 }
 
 export function isDaemonControlWedged(status: DaemonStatus): boolean {
@@ -334,7 +354,7 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
         action: async (session) => {
           if (!isSafePlainTextReplyState(session)) {
             return domainFailure(
-              'Message is available for an idle active agent, ordinary text input, or a resumable done/failed session. Explicitly stopped sessions stay stopped.',
+              'Message is available for an idle agent or a resumable done/failed session. A session waiting on a permission prompt or dialog must be opened and answered there, and explicitly stopped sessions stay stopped.',
               ['attach', session.id!],
             );
           }

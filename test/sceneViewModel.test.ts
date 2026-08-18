@@ -192,7 +192,7 @@ describe('Snapshot -> pixel office scene view model', () => {
         session: {
           id: 'bound123',
           state: 'blocked',
-          waitingFor: 'input needed',
+          status: 'idle',
         },
         bindingState: 'active',
       }),
@@ -214,6 +214,44 @@ describe('Snapshot -> pixel office scene view model', () => {
     expect(actions.stop).toBe(true);
     expect(actions.logs).toBe(true);
     expect(actions.reply).toBe(true);
+  });
+
+  it('offers Message to an idle awaiting agent but never to a named wait', async () => {
+    const view = await mapper();
+    const ready = {
+      workspaceReady: true,
+      trusted: true,
+      capabilities: {
+        start: true,
+        stop: true,
+        logs: true,
+        plainTextReply: true,
+      },
+    };
+    // claude v2.1.234 reports an agent awaiting instructions as blocked/idle
+    // with no waitingFor, and a permission prompt as blocked/waiting with one.
+    const awaiting = view.actionState(
+      slot({
+        session: { id: 'bound123', state: 'blocked', status: 'idle' },
+        bindingState: 'active',
+      }),
+      ready,
+    );
+    expect(awaiting.reply).toBe(true);
+
+    const prompted = view.actionState(
+      slot({
+        session: {
+          id: 'bound123',
+          state: 'blocked',
+          status: 'waiting',
+          waitingFor: 'permission prompt',
+        },
+        bindingState: 'active',
+      }),
+      ready,
+    );
+    expect(prompted.reply).toBe(false);
   });
 
   it('does not offer Clear while exact binding absence is unverified', async () => {

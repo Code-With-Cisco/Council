@@ -103,6 +103,35 @@ describe('parseRoster', () => {
     expect(parsed[0]?.waitingFor).toBe('something new');
   });
 
+  it('keeps the two blocked shapes distinguishable', () => {
+    // Recorded from claude v2.1.234. These two rows are both `blocked` and only
+    // status/waitingFor tell them apart, which is what decides whether plain
+    // text may be sent: an idle agent is awaiting instructions, while a named
+    // wait means a prompt owns the input.
+    const [awaiting, prompted] = parseRoster([
+      {
+        id: '57f11bcf',
+        kind: 'background',
+        state: 'blocked',
+        status: 'idle',
+      },
+      {
+        id: '81605554',
+        kind: 'background',
+        state: 'blocked',
+        status: 'waiting',
+        waitingFor: 'permission prompt',
+      },
+    ]);
+    expect(awaiting?.status).toBe('idle');
+    expect(awaiting?.waitingFor).toBeUndefined();
+    expect(prompted?.status).toBe('waiting');
+    expect(prompted?.waitingFor).toBe('permission prompt');
+    // Neither is dormant: both are hosted by the supervisor.
+    expect(awaiting?.cold).toBe(false);
+    expect(prompted?.cold).toBe(false);
+  });
+
   it('returns an empty roster for malformed input', () => {
     expect(parseRoster(null)).toEqual([]);
     expect(parseRoster('nope')).toEqual([]);

@@ -805,11 +805,11 @@ function renderAgentDetail(panel, slot, kicker, options = {}) {
     ? session.state === 'done' || session.state === 'failed'
       ? 'Send a reply and resume this conversation'
       : 'Message this agent'
-    : session.waitingFor && session.waitingFor !== 'input needed'
+    : session.waitingFor
       ? `Reply disabled: waiting for ${session.waitingFor}`
       : session.state === 'stopped'
         ? 'Reply disabled: this session was explicitly stopped'
-        : 'Message unavailable until this exact session is idle or requests text input';
+        : 'Message unavailable until this exact session is idle';
   reply.disabled = !canReply(slot);
   const wakesSession = session.state === 'done' || session.state === 'failed';
   const send = element(

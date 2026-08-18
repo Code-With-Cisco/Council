@@ -262,7 +262,13 @@ function deriveUiIssues(state: UiState): readonly UiIssue[] {
       },
       actions: [
         'open',
-        ...(session.waitingFor === 'input needed' ? (['reply'] as const) : []),
+        // Same rule as isSafePlainTextReplyState: offer Reply only for an idle
+        // session that names nothing it is waiting on. A permission prompt sets
+        // `waitingFor` and must be answered by opening the session.
+        ...(session.waitingFor === undefined &&
+        session.status?.toLowerCase() === 'idle'
+          ? (['reply'] as const)
+          : []),
       ],
     });
   }
