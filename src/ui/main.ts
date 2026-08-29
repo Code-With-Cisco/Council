@@ -606,10 +606,10 @@ function registerIpc(): void {
           }
           const confirmation = await dialog.showMessageBox(mainWindow!, {
             type: 'question',
-            title: 'Install Agent Pack?',
-            message: `Install Agent Pack v${preview.version} into ${currentState.workspace.label ?? 'this repository'}?`,
+            title: preview.operation === 'update' ? 'Update Agent Pack?' : 'Install Agent Pack?',
+            message: `${preview.operation === 'update' ? 'Update' : 'Install'} Agent Pack v${preview.version} in ${currentState.workspace.label ?? 'this repository'}?`,
             detail,
-            buttons: ['Install', 'Cancel'],
+            buttons: [preview.operation === 'update' ? 'Update' : 'Install', 'Cancel'],
             defaultId: 1,
             cancelId: 1,
             noLink: true,
@@ -619,6 +619,45 @@ function registerIpc(): void {
           return { ok: true, value: result };
         } catch (error) {
           return unavailable(`Agent Pack installation failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
+      uninstallAgentPack: async () => {
+        const projectDir = currentState?.projectDir;
+        if (projectDir === undefined || currentState?.workspace.trusted !== true) {
+          return unavailable('Choose and trust a repository before uninstalling the Agent Pack.');
+        }
+        try {
+          const installer = new AgentPackInstaller(app.getAppPath(), projectDir);
+          const preview = await installer.previewUninstall();
+          const detail = preview.items
+            .map((item) => `${item.action.toUpperCase()}: ${item.relativePath}\n  ${item.detail}`)
+            .join('\n');
+          if (!preview.canUninstall) {
+            await dialog.showMessageBox(mainWindow!, {
+              type: 'warning',
+              title: 'Agent Pack uninstall conflicts require attention',
+              message: 'No files were changed.',
+              detail,
+              buttons: ['Close'],
+              noLink: true,
+            });
+            return unavailable('Agent Pack has files changed after installation. Nothing was deleted or restored.');
+          }
+          const confirmation = await dialog.showMessageBox(mainWindow!, {
+            type: 'warning',
+            title: 'Uninstall Agent Pack?',
+            message: `Remove managed Agent Pack v${preview.version} files from ${currentState.workspace.label ?? 'this repository'}?`,
+            detail: `${detail}\n\nUnchanged managed files will be removed and pre-install settings will be restored.`,
+            buttons: ['Uninstall and restore', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          });
+          if (confirmation.response !== 0) return unavailable('Agent Pack uninstall was canceled.');
+          const result = await installer.uninstall(preview);
+          return { ok: true, value: result };
+        } catch (error) {
+          return unavailable(`Agent Pack uninstall failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       },
       getUpdateState: () => appUpdateController.state,

@@ -6,6 +6,7 @@ import type { AgentRuntimeCapabilities } from '../supervisor/contracts.js';
 import type { ResolvedAgentCatalog } from '../supervisor/catalog.js';
 import type { SessionBindingStoreProblem } from '../supervisor/sessionBindings.js';
 import type { AppUpdateState } from './appUpdater.js';
+import type { AgentPackInstallResult, AgentPackUninstallResult } from './agentPack.js';
 import type {
   UiCreateMissionInput,
   UiCreateMissionResult,
@@ -40,6 +41,7 @@ export const IPC_CHANNELS = {
   recoverSupervisor: 'dc:recover-supervisor',
   refreshDiagnostics: 'dc:refresh-diagnostics',
   installAgentPack: 'dc:install-agent-pack',
+  uninstallAgentPack: 'dc:uninstall-agent-pack',
   getUpdateState: 'dc:update:get-state',
   checkForUpdates: 'dc:update:check',
   downloadUpdate: 'dc:update:download',
@@ -196,12 +198,8 @@ export interface DecagramCouncilApi {
   wakeSquad(): Promise<UiResult<string>>;
   recoverSupervisor(): Promise<UiResult<DaemonStopOutcome>>;
   refreshDiagnostics(): Promise<UiResult<UiLaunchPreflight>>;
-  installAgentPack(): Promise<UiResult<{
-    readonly version: number;
-    readonly created: number;
-    readonly merged: number;
-    readonly unchanged: number;
-  }>>;
+  installAgentPack(): Promise<UiResult<AgentPackInstallResult>>;
+  uninstallAgentPack(): Promise<UiResult<AgentPackUninstallResult>>;
   getUpdateState(): Promise<AppUpdateState>;
   checkForUpdates(): Promise<UiResult<AppUpdateState>>;
   downloadUpdate(): Promise<UiResult<AppUpdateState>>;

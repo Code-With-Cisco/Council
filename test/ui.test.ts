@@ -90,6 +90,7 @@ describe('Windows Electron shell', () => {
     expect(preload).toContain('chooseWorkspace: ()');
     expect(preload).toContain('activateWorkspace: (workspaceId)');
     expect(preload).toContain('installAgentPack: ()');
+    expect(preload).toContain('uninstallAgentPack: ()');
     expect(preload).toContain('checkForUpdates: ()');
     expect(preload).toContain('downloadUpdate: ()');
     expect(preload).toContain('installUpdate: ()');
@@ -172,6 +173,7 @@ describe('Windows Electron shell', () => {
     expect(renderer).toContain('Start with message');
     expect(renderer).toContain('api.activateWorkspace(targetId)');
     expect(renderer).toContain('api.installAgentPack()');
+    expect(renderer).toContain('api.uninstallAgentPack()');
     expect(renderer).toContain('api.checkForUpdates()');
     expect(renderer).toContain('api.downloadUpdate()');
     expect(renderer).toContain('api.installUpdate()');

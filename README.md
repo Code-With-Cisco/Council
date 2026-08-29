@@ -83,6 +83,12 @@ The diagnostics view does not guess. Missing dependencies remain visible, a stop
 daemon is shown as a normal resting state, and unrecognized daemon prose is shown as
 **Unknown** with the raw text retained.
 
+The Repository Agent Pack has a previewed lifecycle: install, conflict-safe
+update, and confirmed uninstall. Its manifest records which files Council
+created, while a checksum-protected backup restores the exact project settings
+that existed before installation. Files or settings edited afterward block the
+operation instead of being overwritten or deleted.
+
 ## Council Review
 
 Council Review is an executable multi-agent pipeline, not a single-context role-play:

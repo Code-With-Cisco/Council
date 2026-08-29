@@ -1,6 +1,6 @@
 # What needs to be done
 
-Action plan updated 2026-08-17 from testing the installed Windows application.
+Action plan updated 2026-08-29 after implementing Agent Pack lifecycle management.
 Work in this document is ordered by user impact and dependency. Do not begin
 multi-window or distribution work until the existing session, Mission, and
 diagnostic paths are observable and reliable.
@@ -16,7 +16,8 @@ Implemented across local repair passes through 2026-08-17:
 - automatic Council progress/result projection with explicit result markers
   and compatibility for the already-completed live transcript;
 - direct Start with message and exact idle-session messaging;
-- conflict-safe Repository Agent Pack preview/install with a versioned manifest;
+- conflict-safe Repository Agent Pack install/update/uninstall with ownership
+  tracking and exact pre-install settings backup restoration;
 - saved single-runtime Office switching by workspace ID; and
 - packaged Codex discovery in current VS Code and VS Code Insiders extension
   layouts for x64 and ARM64; and
@@ -30,9 +31,10 @@ Implemented across local repair passes through 2026-08-17:
   conversations, plus complete Start Squad previews for long-form role
   definitions up to the provider-safe 100,000-character contract.
 
-Automated verification is green (`npx tsc --noEmit`, 50 test files / 446 tests,
-build, combined x64/ARM64 NSIS packaging, and a clean production dependency
-audit). The
+The prior release verification is green (`npx tsc --noEmit`, 50 test files /
+446 tests, build, combined x64/ARM64 NSIS packaging, and a clean production
+dependency audit). Current 0.2.4 verification is recorded in
+`WHAT-WAS-DONE.md`. The
 following work remains and must not be
 treated as verified or complete:
 
@@ -42,8 +44,6 @@ treated as verified or complete:
 - confirm Diagnostics reports **Guard self-test: Passed** in a newly installed
   build. The rebuilt unpacked x64 package and its exact external script pass,
   but an installer/UI interaction is not claimed yet;
-- add Agent Pack update/uninstall with backup restoration. The current installer
-  is idempotent and conflict-safe but intentionally has no destructive uninstall;
 - add the user-selected Codex executable override/picker and attempted-location
   history. Automatic discovery for the observed VS Code path is implemented;
 - add Mission abandoned-draft reset and validate live retry behavior;

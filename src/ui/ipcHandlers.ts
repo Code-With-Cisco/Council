@@ -3,6 +3,7 @@ import type { CliResult } from '../integration/types.js';
 import type { AgentSupervisorPort } from '../supervisor/contracts.js';
 import type { MissionUiController } from './missionUi.js';
 import type { AppUpdateState } from './appUpdater.js';
+import type { AgentPackInstallResult, AgentPackUninstallResult } from './agentPack.js';
 import { sanitizeTerminalOutput } from './logOutput.js';
 import {
   IPC_CHANNELS,
@@ -42,12 +43,8 @@ export interface CouncilIpcDependencies {
   readonly getMissionController: () => MissionUiController | undefined;
   readonly recoverSupervisor: () => Promise<UiResult<import('../integration/types.js').DaemonStopOutcome>>;
   readonly refreshDiagnostics?: () => Promise<UiResult<import('./ipc.js').UiLaunchPreflight>>;
-  readonly installAgentPack?: (() => Promise<UiResult<{
-    readonly version: number;
-    readonly created: number;
-    readonly merged: number;
-    readonly unchanged: number;
-  }>>) | undefined;
+  readonly installAgentPack?: (() => Promise<UiResult<AgentPackInstallResult>>) | undefined;
+  readonly uninstallAgentPack?: (() => Promise<UiResult<AgentPackUninstallResult>>) | undefined;
   readonly getUpdateState?: (() => AppUpdateState) | undefined;
   readonly checkForUpdates?: (() => Promise<UiResult<AppUpdateState>>) | undefined;
   readonly downloadUpdate?: (() => Promise<UiResult<AppUpdateState>>) | undefined;
@@ -307,6 +304,11 @@ export function registerCouncilIpc(
   registrar.handle(IPC_CHANNELS.installAgentPack, async (event) => {
     if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
     return dependencies.installAgentPack?.() ?? unavailable('Agent Pack installation is unavailable.');
+  });
+
+  registrar.handle(IPC_CHANNELS.uninstallAgentPack, async (event) => {
+    if (!dependencies.isTrusted(event)) return unavailable('Untrusted IPC sender.');
+    return dependencies.uninstallAgentPack?.() ?? unavailable('Agent Pack uninstall is unavailable.');
   });
 
   registrar.handle(IPC_CHANNELS.getUpdateState, (event) => {

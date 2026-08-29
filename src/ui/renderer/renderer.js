@@ -2336,7 +2336,18 @@ byId('install-agent-pack-button').addEventListener('click', async (event) => {
   );
   if (result?.ok) {
     setFeedback(
-      `Agent Pack v${result.value.version} installed: ${result.value.created} created, ${result.value.merged} merged, ${result.value.unchanged} unchanged.`,
+      `Agent Pack v${result.value.version} ${result.value.operation === 'update' ? 'updated' : 'installed'}: ${result.value.created} created, ${result.value.updated} updated, ${result.value.merged} merged, ${result.value.unchanged} unchanged.`,
+    );
+  }
+});
+
+byId('uninstall-agent-pack-button').addEventListener('click', async (event) => {
+  const result = await runAction(event.currentTarget, 'Opening previewâ€¦', () =>
+    api.uninstallAgentPack(),
+  );
+  if (result?.ok) {
+    setFeedback(
+      `Agent Pack v${result.value.version} uninstalled: ${result.value.removed} removed, ${result.value.restored} restored, ${result.value.leftUnchanged} pre-existing files left unchanged.`,
     );
   }
 });

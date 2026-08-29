@@ -359,10 +359,15 @@
           <div id="diagnostics-grid" class="diagnostics-grid"></div>
           <section class="message-panel">
             <h3>Repository Agent Pack</h3>
-            <p class="muted">Preview and install Council agents plus guarded PowerShell hooks into this trusted repository. Existing conflicting files are never overwritten.</p>
-            <button id="install-agent-pack-button" class="button button-primary" type="button">
-              Preview Agent Pack install
-            </button>
+            <p class="muted">Preview, install, update, or safely remove Council agents and guarded PowerShell hooks. User-modified files are never overwritten or deleted; uninstall restores the exact pre-install settings backup.</p>
+            <div class="button-row">
+              <button id="install-agent-pack-button" class="button button-primary" type="button">
+                Preview install or update
+              </button>
+              <button id="uninstall-agent-pack-button" class="button button-danger" type="button">
+                Preview uninstall
+              </button>
+            </div>
           </section>
           <section class="message-panel">
             <h3>Supervisor recovery</h3>

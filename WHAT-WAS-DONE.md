@@ -327,3 +327,33 @@ Test/Review office profiles could not be claimed by a Mission:
 - A live installed-app Mission launch remains for user verification; automated
   checks do not claim that interaction.
 - No commit, push, tag, release, or installation was performed for this repair.
+
+## Agent Pack lifecycle management
+
+Implemented on 2026-08-29 as the next product step from the ordered backlog:
+
+- Upgraded the Agent Pack manifest to version 2 with per-file installed hashes
+  and explicit ownership. Updates replace only Council-created files that still
+  match the previously installed hash; pre-existing matching files remain
+  user-owned.
+- Added an exact pre-install settings backup for installs that create or merge
+  `.claude/settings.json`. The installed settings checksum must still match
+  before uninstall can restore that backup or remove settings created by the
+  pack.
+- Added preview-and-confirm update and uninstall flows through typed, trusted
+  IPC and the Diagnostics UI. Any user-modified managed file, changed settings,
+  missing backup, stale preview, or malformed/legacy manifest blocks the whole
+  action before deletion.
+- Added path allowlisting for manifest entries so tampered metadata cannot make
+  uninstall operate outside the known Agent Pack resource set.
+- Bumped the local development build from 0.2.3 to 0.2.4. Nothing was
+  published.
+
+### Agent Pack lifecycle verification
+
+- TypeScript typecheck passed.
+- Focused Agent Pack, IPC, and UI tests passed: 3 files, 32 tests.
+- Full suite passed: 50 files, 451 tests, 0 failures.
+- Production TypeScript build passed.
+- Local Electron launch is recorded in the current handoff.
+- No commit, push, tag, release, installer build, or installation was performed.

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,7 @@ describe('repository Agent Pack', () => {
     expect(await readFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'), 'utf8'))
       .toContain('name: reviewer');
     expect(await readFile(path.join(workspace, '.claude', 'decagram-council-agent-pack.json'), 'utf8'))
-      .toContain('"version": 1');
+      .toContain('"version": 2');
   });
 
   it('blocks a differing existing definition instead of overwriting it', async () => {
@@ -55,5 +55,74 @@ describe('repository Agent Pack', () => {
       relativePath: path.join('.claude', 'agents', 'reviewer.md'),
       action: 'conflict',
     }));
+  });
+
+  it('updates only unchanged managed files', async () => {
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'council-pack-source-'));
+    await cp(path.join(REPO_ROOT, '.claude'), path.join(fixtureRoot, '.claude'), { recursive: true });
+    await cp(path.join(REPO_ROOT, 'scripts', 'gates'), path.join(fixtureRoot, 'scripts', 'gates'), { recursive: true });
+    const workspace = await mkdtemp(path.join(tmpdir(), 'council-pack-update-'));
+    const installer = new AgentPackInstaller(fixtureRoot, workspace);
+    await installer.install(await installer.preview());
+
+    const reviewerSource = path.join(fixtureRoot, '.claude', 'agents', 'reviewer.md');
+    await writeFile(reviewerSource, `${await readFile(reviewerSource, 'utf8')}\nUpdated pack content.\n`, 'utf8');
+    const updatedInstaller = new AgentPackInstaller(fixtureRoot, workspace);
+    const preview = await updatedInstaller.preview();
+    expect(preview.operation).toBe('update');
+    expect(preview.items).toContainEqual(expect.objectContaining({
+      relativePath: path.join('.claude', 'agents', 'reviewer.md'),
+      action: 'update',
+    }));
+
+    const result = await updatedInstaller.install(preview);
+    expect(result.updated).toBe(1);
+    expect(await readFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'), 'utf8'))
+      .toContain('Updated pack content.');
+  });
+
+  it('uninstalls owned files and restores the exact pre-install settings backup', async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'council-pack-uninstall-'));
+    await mkdir(path.join(workspace, '.claude', 'agents'), { recursive: true });
+    const originalSettings = '{\n  "customSetting": true\n}\n';
+    await writeFile(path.join(workspace, '.claude', 'settings.json'), originalSettings, 'utf8');
+    const preExistingReviewer = await readFile(path.join(REPO_ROOT, '.claude', 'agents', 'reviewer.md'));
+    await writeFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'), preExistingReviewer);
+    const installer = new AgentPackInstaller(REPO_ROOT, workspace);
+    await installer.install(await installer.preview());
+
+    const preview = await installer.previewUninstall();
+    expect(preview.canUninstall).toBe(true);
+    expect(preview.items).toContainEqual(expect.objectContaining({
+      relativePath: path.join('.claude', 'agents', 'reviewer.md'),
+      action: 'leave',
+    }));
+    expect(preview.items).toContainEqual(expect.objectContaining({
+      relativePath: path.join('.claude', 'settings.json'),
+      action: 'restore',
+    }));
+    const result = await installer.uninstall(preview);
+
+    expect(result.restored).toBe(1);
+    expect(result.removed).toBeGreaterThan(10);
+    expect(await readFile(path.join(workspace, '.claude', 'settings.json'), 'utf8')).toBe(originalSettings);
+    expect(await readFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'))).toEqual(preExistingReviewer);
+    await expect(readFile(path.join(workspace, '.claude', 'agents', 'builder.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(path.join(workspace, '.claude', 'decagram-council-agent-pack.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('blocks uninstall when a managed file or settings changed after installation', async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), 'council-pack-uninstall-conflict-'));
+    const installer = new AgentPackInstaller(REPO_ROOT, workspace);
+    await installer.install(await installer.preview());
+    await writeFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'), 'user changed this\n', 'utf8');
+    await writeFile(path.join(workspace, '.claude', 'settings.json'), '{"userChanged":true}\n', 'utf8');
+
+    const preview = await installer.previewUninstall();
+    expect(preview.canUninstall).toBe(false);
+    expect(preview.items.filter((item) => item.action === 'conflict')).toHaveLength(2);
+    await expect(installer.uninstall(preview)).rejects.toThrow('contains conflicts');
+    expect(await readFile(path.join(workspace, '.claude', 'agents', 'reviewer.md'), 'utf8'))
+      .toBe('user changed this\n');
   });
 });
