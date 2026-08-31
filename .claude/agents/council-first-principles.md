@@ -63,7 +63,7 @@ Before submitting:
 - do not disclose your draft reasoning to another advisor.
 
 Return the completed response as the final output, address nobody, and end on
-the exact line `COUNCIL MEMBER SIGN-OFF`.
+the exact line `COUNCIL RESPONSE COMPLETE`.
 
 If another advisor's answer reaches you before submission, do not use it and
 notify the lead that the independence boundary may have been compromised.
