@@ -1,0 +1,60 @@
+name: Import Agency Agents
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/import-agency-agents.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agency-agents-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Council
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Import reviewed Agency identities
+        run: node scripts/import-agency-agents.mjs
+
+      - name: Verify import boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/agency-agents/manifest.json
+          test -f docs/agency-agents/ROUTING_INDEX.md
+          test ! -f .claude/agents/agency-agents/UPSTREAM.md
+          count="$(find .claude/agents/agency-agents -type f -name '*.md' | wc -l | tr -d ' ')"
+          test "$count" = "273"
+          if find .claude/agents/agency-agents -type f \( -name '*.sh' -o -name '*.ps1' -o -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name '*.py' -o -name '*.yml' -o -name '*.yaml' \) | grep -q .; then
+            echo 'Executable/config upstream content escaped the import boundary.' >&2
+            exit 1
+          fi
+
+      - name: Commit imported catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .claude/agents/agency-agents docs/agency-agents; then
+            echo 'Pinned Agency catalog already matches the reviewed snapshot.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .claude/agents/agency-agents docs/agency-agents
+          git commit -m 'Import pinned Agency Agents catalog'
+          git push
