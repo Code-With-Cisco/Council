@@ -25,7 +25,8 @@ describe('council agent definitions', () => {
       expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
       expect(frontmatter?.['permissionMode']).toBeUndefined();
       expect(source).toContain('final output');
-      expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
+      expect(source).toContain('COUNCIL RESPONSE COMPLETE');
+      expect(source).not.toContain('COUNCIL MEMBER SIGN-OFF');
     }
   });
 
@@ -48,7 +49,8 @@ describe('council agent definitions', () => {
     expect(source).toContain('five substantive responses');
     expect(source).toContain('Response A');
     expect(source).toContain('chairman');
-    expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
+    expect(source).toContain('COUNCIL RESPONSE COMPLETE');
+    expect(source).not.toContain('COUNCIL MEMBER SIGN-OFF');
     expect(source).toContain('independently started Claude sessions');
   });
 
