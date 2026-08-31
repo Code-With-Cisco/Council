@@ -1,20 +1,20 @@
 import {
-  AGENCY_DIVISIONS,
-  defaultCapabilityProfileForDivision,
-  type AgencyDivision,
+  DEPARTMENT_IDS,
+  defaultSpecialistCapabilityProfile,
   type CapabilityProfileId,
+  type DepartmentId,
 } from './capabilityPolicy.js';
 
 export interface DepartmentDefinition {
-  readonly id: AgencyDivision;
+  readonly id: DepartmentId;
   readonly displayName: string;
   readonly officeFloor: number;
   readonly headAgent: 'department-head';
-  readonly specialistPathPrefix: string;
+  readonly specialistAgent: 'department-specialist';
   readonly defaultCapabilityProfile: CapabilityProfileId;
 }
 
-const DISPLAY_NAMES: Readonly<Record<AgencyDivision, string>> = {
+const DISPLAY_NAMES: Readonly<Record<DepartmentId, string>> = {
   academic: 'Academic',
   design: 'Design',
   engineering: 'Engineering',
@@ -35,6 +35,10 @@ const DISPLAY_NAMES: Readonly<Record<AgencyDivision, string>> = {
   testing: 'Testing & Quality',
 };
 
+/**
+ * The building model is Council-owned durable topology, not provider team
+ * state. Floors remain stable even when no provider sessions are running.
+ */
 export const EXECUTIVE_FLOORS = Object.freeze({
   lobby: 0,
   departmentsStart: 1,
@@ -42,24 +46,22 @@ export const EXECUTIVE_FLOORS = Object.freeze({
   queenBee: 20,
 });
 
-export const DEPARTMENTS: readonly DepartmentDefinition[] = AGENCY_DIVISIONS.map(
+export const DEPARTMENTS: readonly DepartmentDefinition[] = DEPARTMENT_IDS.map(
   (id, index) => ({
     id,
     displayName: DISPLAY_NAMES[id],
     officeFloor: EXECUTIVE_FLOORS.departmentsStart + index,
     headAgent: 'department-head',
-    specialistPathPrefix: `.claude/agents/agency-agents/${id}/`,
-    defaultCapabilityProfile: defaultCapabilityProfileForDivision(id),
+    specialistAgent: 'department-specialist',
+    defaultCapabilityProfile: defaultSpecialistCapabilityProfile(id),
   }),
 );
 
-const BY_ID = new Map<AgencyDivision, DepartmentDefinition>(
+const BY_ID = new Map<DepartmentId, DepartmentDefinition>(
   DEPARTMENTS.map((department) => [department.id, department]),
 );
 
-export function departmentById(
-  id: AgencyDivision,
-): DepartmentDefinition {
+export function departmentById(id: DepartmentId): DepartmentDefinition {
   const department = BY_ID.get(id);
   if (department === undefined) {
     throw new Error(`Unknown Council department: ${id}`);
@@ -67,6 +69,6 @@ export function departmentById(
   return department;
 }
 
-export function isAgencyDivision(value: string): value is AgencyDivision {
-  return (AGENCY_DIVISIONS as readonly string[]).includes(value);
+export function isDepartmentId(value: string): value is DepartmentId {
+  return (DEPARTMENT_IDS as readonly string[]).includes(value);
 }
