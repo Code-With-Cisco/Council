@@ -18,7 +18,6 @@
     "verify:codex-live": "npm run build && node scripts/verify-codex-app-server.mjs",
     "harness": "tsx src/integration/harness/cli.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "sync:agency-agents": "node scripts/import-agency-agents.mjs",
     "start": "npm run build && electron .",
     "pack:win": "npm run build && electron-builder --win dir",
     "dist:win": "npm run build && electron-builder --win",
