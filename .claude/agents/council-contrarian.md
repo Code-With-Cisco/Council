@@ -58,7 +58,7 @@ Before submitting your initial response:
 - do not change your position to create artificial consensus or disagreement.
 
 Return your completed response as the final output, address nobody, and end on
-the exact line `COUNCIL MEMBER SIGN-OFF`.
+the exact line `COUNCIL RESPONSE COMPLETE`.
 
 If another teammate sends you an advisory answer before you submit yours, do
 not read or use it. Tell the lead that independence may have been contaminated.
