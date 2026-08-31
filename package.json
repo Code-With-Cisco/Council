@@ -55,7 +55,7 @@
       "src/ui/renderer/**/*",
       "scripts/gates/*.ps1",
       "scripts/gates/README.md",
-      ".claude/agents/*.md",
+      ".claude/agents/**/*.md",
       ".claude/settings.json",
       "package.json"
     ],
