@@ -160,7 +160,7 @@
   }
 
   /**
-   * The office page index is now a real building floor rather than an arbitrary
+   * The office page index is a real building floor rather than an arbitrary
    * chunk of five agents. Department floors remain stable even when no specialist
    * is running, which lets the UI show where work belongs before a session starts.
    */
@@ -190,6 +190,52 @@
       })),
     };
   }
+
+  function installOfficeFloorNavigation() {
+    const label = document.getElementById('office-page-label');
+    const previous = document.getElementById('office-previous');
+    const next = document.getElementById('office-next');
+    const pagination = label?.parentElement;
+    if (!label || !previous || !next || !pagination) return;
+
+    const picker = document.createElement('select');
+    picker.id = 'office-floor-picker';
+    picker.className = 'office-floor-picker';
+    picker.setAttribute('aria-label', 'Office floor');
+    OFFICE_FLOORS.forEach((floor, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      option.textContent = `Floor ${floor.floor} — ${floor.label}`;
+      picker.append(option);
+    });
+    pagination.insertBefore(picker, next);
+
+    let currentPage = 0;
+    const rewriteLabel = () => {
+      const match = /^OFFICE\s+(\d+)\s*\/\s*(\d+)$/i.exec(label.textContent?.trim() ?? '');
+      if (!match) return;
+      currentPage = Math.max(0, Math.min(Number(match[1]) - 1, OFFICE_FLOORS.length - 1));
+      const floor = OFFICE_FLOORS[currentPage];
+      label.textContent = `FLOOR ${floor.floor} · ${floor.label.toUpperCase()}`;
+      picker.value = String(currentPage);
+      const stationHeading = document.getElementById('station-heading');
+      if (stationHeading) stationHeading.textContent = `${floor.label} floor`;
+    };
+
+    const observer = new MutationObserver(rewriteLabel);
+    observer.observe(label, { childList: true, characterData: true, subtree: true });
+    rewriteLabel();
+
+    picker.addEventListener('change', () => {
+      const requested = Number(picker.value);
+      if (!Number.isInteger(requested) || requested === currentPage) return;
+      const button = requested > currentPage ? next : previous;
+      const count = Math.abs(requested - currentPage);
+      for (let step = 0; step < count; step += 1) button.click();
+    });
+  }
+
+  installOfficeFloorNavigation();
 
   window.DecagramCouncilSceneViewModel = {
     OFFICE_FLOORS,
