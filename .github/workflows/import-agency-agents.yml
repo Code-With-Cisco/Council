@@ -53,8 +53,10 @@ jobs:
             echo 'Pinned Agency catalog already matches the reviewed snapshot.'
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Repository ownership policy: automated work is committed under Cisco's
+          # repository identity. Agents/bots must never claim authorship or ownership.
+          git config user.name 'Cisco'
+          git config user.email '115424057+Code-With-Cisco@users.noreply.github.com'
           git add .claude/agents/agency-agents docs/agency-agents
           git commit -m 'Import pinned Agency Agents catalog'
           git pull --rebase origin main
