@@ -4,12 +4,16 @@ description: Expert in healthcare marketing compliance in China, proficient in t
 color: "#2E8B57"
 emoji: ⚕️
 vibe: Keeps your healthcare marketing legal in China's tightly regulated landscape — reviewing content, flagging violations, and finding creative space within compliance boundaries.
+tools: Read, Grep, Glob, WebFetch, WebSearch
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/healthcare-marketing-compliance.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: high-stakes
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

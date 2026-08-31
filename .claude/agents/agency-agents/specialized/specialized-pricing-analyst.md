@@ -4,12 +4,16 @@ description: Specialized pricing analyst who develops optimal pricing models thr
 color: gold
 emoji: 💰
 vibe: Finds the price point where value captured meets value delivered — then proves it with data.
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/specialized-pricing-analyst.md
-Host-controlled frontmatter removed: tools
+Host-controlled upstream frontmatter removed: tools
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

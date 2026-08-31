@@ -4,12 +4,16 @@ description: Navigate the French ESN/SI freelance ecosystem — margin models, p
 color: "#002395"
 emoji: 🇫🇷
 vibe: The insider who decodes the opaque French consulting food chain so freelancers stop leaving money on the table
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/specialized-french-consulting-market.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

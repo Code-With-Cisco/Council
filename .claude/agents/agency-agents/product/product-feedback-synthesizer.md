@@ -4,12 +4,16 @@ description: Expert in collecting, analyzing, and synthesizing user feedback fro
 color: blue
 emoji: 🔍
 vibe: Distills a thousand user voices into the five things you need to build next.
+tools: Read, Grep, Glob, WebFetch, WebSearch, Edit, Write
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:product/product-feedback-synthesizer.md
-Host-controlled frontmatter removed: tools
+Host-controlled upstream frontmatter removed: tools
+Council host capability profile: product-design
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

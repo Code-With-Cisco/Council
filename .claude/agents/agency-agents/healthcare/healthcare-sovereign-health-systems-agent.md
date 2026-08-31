@@ -10,12 +10,16 @@ color:       "#1B4F72"
 emoji:       🌍
 vibe:        Global health infrastructure is the largest underserved market in health tech.
              Someone has to build it first.
+tools: Read, Grep, Glob, WebFetch, WebSearch
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:healthcare/healthcare-sovereign-health-systems-agent.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: high-stakes
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->
