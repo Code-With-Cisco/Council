@@ -41,6 +41,10 @@ export interface StartSessionRequest {
   readonly model?: string | undefined;
   readonly effort?: string | undefined;
   readonly permissionMode?: string | undefined;
+  /** Council-owned per-launch additions to the host allow policy. */
+  readonly allowedTools?: readonly string[] | undefined;
+  /** Council-owned per-launch deny policy. Denies narrow any definition/settings grants. */
+  readonly disallowedTools?: readonly string[] | undefined;
 }
 
 /**
@@ -71,6 +75,27 @@ export interface ClaudeClientOptions {
   readonly defaultTimeoutMs?: number | undefined;
 }
 
+function normalizedToolList(values: readonly string[] | undefined, label: string): string[] {
+  if (values === undefined) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim();
+    if (
+      value === '' ||
+      /[\u0000-\u001f\u007f,]/.test(value) ||
+      value.length > 512
+    ) {
+      throw new Error(`${label} contains an invalid tool selector.`);
+    }
+    if (!seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
+
 export function buildStartSessionArgv(request: StartSessionRequest): string[] {
   if (request.prompt.trim() === '') {
     throw new Error('start() requires a non-empty prompt');
@@ -82,6 +107,10 @@ export function buildStartSessionArgv(request: StartSessionRequest): string[] {
   if (request.model !== undefined) argv.push('--model', request.model);
   if (request.effort !== undefined) argv.push('--effort', request.effort);
   if (request.permissionMode !== undefined) argv.push('--permission-mode', request.permissionMode);
+  const allowedTools = normalizedToolList(request.allowedTools, 'Allowed tools');
+  const disallowedTools = normalizedToolList(request.disallowedTools, 'Disallowed tools');
+  if (allowedTools.length > 0) argv.push('--allowedTools', allowedTools.join(','));
+  if (disallowedTools.length > 0) argv.push('--disallowedTools', disallowedTools.join(','));
   argv.push(request.prompt);
   return argv;
 }
@@ -179,170 +208,94 @@ export class ClaudeClient {
   /**
    * Dispatches a background session.
    *
-   * Flag order matches the documented form: `claude --bg --agent <name>
-   * --name <label> "<prompt>"`. The prompt is the trailing positional and is
-   * passed as one argv element — no shell is involved, so it needs no quoting.
+   * The caller must have validated `agent` against disk first. Claude silently
+   * falls back to its default template for an unknown agent, so the raw warning
+   * is checked and returned as `unknownAgent` even when the command exits 0.
    */
-  async start(request: StartSessionRequest): Promise<CliResult<StartSessionOutcome>> {
+  async startSession(request: StartSessionRequest): Promise<CliResult<StartSessionOutcome>> {
     const argv = buildStartSessionArgv(request);
-
-    // Dispatch cold-starts the supervisor ("Starting background service…"),
-    // which is slower than a steady-state call.
-    const result = await this.exec(argv, { cwd: request.cwd, timeoutMs: 60_000 });
+    const result = await this.exec(argv, { cwd: request.cwd });
     if (!result.ok) return result;
-
     const started = parseStartedSession(result.value);
-    if (started === null) {
+    if (started === undefined) {
       return {
         ok: false,
         kind: 'malformed-output',
-        message: 'Could not read a session id from the dispatch output',
+        message: 'Claude started without a recognized background-session acknowledgement.',
         raw: result.raw,
-        argv,
+        argv: result.argv,
         exitCode: 0,
         durationMs: result.durationMs,
       };
     }
-
     return {
       ...result,
-      value: { ...started, unknownAgent: detectUnknownAgentWarning(result.value) ?? undefined },
+      value: {
+        ...started,
+        unknownAgent: detectUnknownAgentWarning(result.raw) ?? undefined,
+      },
     };
   }
 
-  /**
-   * Dispatches a supervisor-hosted shell job instead of a Claude session.
-   *
-   * Same roster row, same control commands, no model call. Used by the harness
-   * to exercise the lifecycle for free, and by the app for the occasional
-   * genuinely non-model job.
-   */
-  async startExec(request: StartExecRequest): Promise<CliResult<StartSessionOutcome>> {
-    if (request.command.trim() === '') {
-      throw new Error('startExec() requires a non-empty command');
-    }
-
-    const argv = ['--bg'];
-    if (request.name !== undefined) argv.push('--name', request.name);
-    argv.push('--exec', request.command);
-
-    const result = await this.exec(argv, { cwd: request.cwd, timeoutMs: 60_000 });
+  async startExec(request: StartExecRequest): Promise<CliResult<StartedSession>> {
+    if (request.command.trim() === '') throw new Error('startExec() requires a non-empty command');
+    const argv = ['--bg', '--exec', request.command];
+    if (request.name !== undefined) argv.splice(2, 0, '--name', request.name);
+    const result = await this.exec(argv, { cwd: request.cwd });
     if (!result.ok) return result;
-
     const started = parseStartedSession(result.value);
-    if (started === null) {
+    if (started === undefined) {
       return {
         ok: false,
         kind: 'malformed-output',
-        message: 'Could not read a session id from the dispatch output',
+        message: 'Claude exec job started without a recognized background-session acknowledgement.',
         raw: result.raw,
-        argv,
+        argv: result.argv,
         exitCode: 0,
         durationMs: result.durationMs,
       };
     }
-
-    return { ...result, value: { ...started, unknownAgent: undefined } };
+    return { ...result, value: started };
   }
 
-  /**
-   * Recent terminal output for a session.
-   *
-   * Requires a reachable supervisor: with the daemon down this fails with
-   * `connect ENOENT .../control.sock`, classified as `daemon-unreachable`.
-   * That is expected for a cold session, not a fault — attaching or replying
-   * wakes it, after which logs succeed.
-   */
-  async logs(id: string): Promise<CliResult<string>> {
-    const argv = ['logs', id];
-    const result = await this.exec(argv, { treatOutputAsSuccess: true });
-    if (!result.ok) return result;
-
-    const raw = result.value;
-    let kind: 'unknown-session' | 'daemon-unreachable' | undefined;
-    if (/^No job matching\b/im.test(raw)) {
-      kind = 'unknown-session';
-    } else if (new RegExp(`^Couldn't read logs for ${escapeRegExp(id)}\\b`, 'im').test(raw)) {
-      kind = 'daemon-unreachable';
-    }
-    if (kind === undefined) return result;
-
-    return {
-      ok: false,
-      kind,
-      message: summarizeOutput(raw, `claude logs ${id} failed`),
-      raw,
-      argv,
-      exitCode: 0,
-      durationMs: result.durationMs,
-    };
-  }
-
-  /** Stops a session, keeping its conversation. Resume later via attach. */
-  stop(id: string): Promise<CliResult<string>> {
+  async stopSession(id: string): Promise<CliResult<string>> {
     return this.exec(['stop', id]);
   }
 
-  /** Restarts a session with its conversation intact. */
-  respawn(id: string): Promise<CliResult<string>> {
+  async resumeSession(id: string): Promise<CliResult<string>> {
     return this.exec(['respawn', id]);
   }
 
-  /**
-   * Restarts every session. This is the "wake the squad" action.
-   *
-   * Never called automatically: after a machine restart the whole squad reads
-   * `failed`, and the user has to see that before anything is respawned.
-   */
-  respawnAll(): Promise<CliResult<string>> {
-    return this.exec(['respawn', '--all'], { timeoutMs: 120_000 });
+  async readLogs(id: string): Promise<CliResult<string>> {
+    return this.exec(['logs', id, '--raw']);
   }
 
-  /** Deletes a session and its worktree. Works on already-exited sessions, unlike stop. */
-  remove(id: string): Promise<CliResult<string>> {
+  async removeSession(id: string): Promise<CliResult<string>> {
     return this.exec(['rm', id]);
   }
 
-  // ---------------------------------------------------------------- daemon
-
-  /**
-   * Supervisor status.
-   *
-   * `treatOutputAsSuccess` is set because this command describes a down daemon
-   * in prose that the error classifier would otherwise read as
-   * `daemon-unreachable`. A stopped supervisor is the normal resting state in
-   * v2.1.233 — service install is disabled, so it runs on demand and exits when
-   * the last client disconnects. Reading it is what tells us so.
-   */
   async daemonStatus(): Promise<CliResult<DaemonStatus>> {
-    const result = await this.exec(['daemon', 'status'], { treatOutputAsSuccess: true });
+    const result = await this.exec(['daemon', 'status']);
     if (!result.ok) return result;
     return { ...result, value: parseDaemonStatus(result.value) };
   }
 
-  /**
-   * Stops the supervisor. Recovery action only.
-   *
-   * `keepWorkers` leaves detached sessions running, which is what makes this
-   * safe to offer: a wedged supervisor can be restarted without killing work.
-   * `any` also stops a transient (non-service) daemon, which is the only kind
-   * this version produces.
-   */
-  async daemonStop(
-    options: { any?: boolean; keepWorkers?: boolean } = {},
-  ): Promise<CliResult<DaemonStopOutcome>> {
-    const argv = ['daemon', 'stop'];
-    if (options.any !== false) argv.push('--any');
-    if (options.keepWorkers !== false) argv.push('--keep-workers');
-    // Like `daemon status`, this describes "nothing to stop" in prose the error
-    // classifier would otherwise read as a daemon failure. Stopping an already
-    // stopped supervisor is a success.
-    const result = await this.exec(argv, { timeoutMs: 30_000, treatOutputAsSuccess: true });
+  async daemonStop(): Promise<CliResult<DaemonStopOutcome>> {
+    const result = await this.exec(['daemon', 'stop']);
     if (!result.ok) return result;
     return { ...result, value: parseDaemonStop(result.value) };
   }
-}
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  async daemonLogs(lines = 200): Promise<CliResult<string>> {
+    if (!Number.isSafeInteger(lines) || lines < 1 || lines > 10_000) {
+      throw new Error('daemonLogs lines must be an integer between 1 and 10000');
+    }
+    return this.exec(['daemon', 'logs', '--lines', String(lines)]);
+  }
+
+  async version(): Promise<CliResult<string>> {
+    const result = await this.exec(['--version']);
+    if (!result.ok) return result;
+    return { ...result, value: summarizeOutput(result.value) };
+  }
 }
