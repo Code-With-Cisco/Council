@@ -81,6 +81,8 @@ const ALL_HOST_CAPABILITIES: readonly HostCapability[] = [
   'persistent-memory',
 ];
 
+const AGENCY_DIVISION_SET = new Set<string>(AGENCY_DIVISIONS);
+
 export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, CapabilityProfile>> = {
   advisory: {
     id: 'advisory',
@@ -193,6 +195,29 @@ const DIVISION_DEFAULTS: Readonly<Record<AgencyDivision, CapabilityProfileId>> =
   testing: 'native-review',
 };
 
+export function agencyDivisionFromDefinitionPath(
+  definitionPath: string | undefined,
+): AgencyDivision | undefined {
+  if (definitionPath === undefined) return undefined;
+  const normalized = definitionPath.replace(/\\/g, '/').toLowerCase();
+  const match = /\/agency-agents\/([^/]+)\//.exec(normalized);
+  const candidate = match?.[1];
+  return candidate !== undefined && AGENCY_DIVISION_SET.has(candidate)
+    ? (candidate as AgencyDivision)
+    : undefined;
+}
+
+export function agencyRiskFromDefinitionPath(
+  definitionPath: string | undefined,
+  division = agencyDivisionFromDefinitionPath(definitionPath),
+): AgencyRisk | undefined {
+  if (division === undefined) return undefined;
+  if (division === 'security') return 'restricted-security';
+  if (division === 'healthcare' || division === 'finance') return 'high-stakes';
+  if (/legal|compliance|privacy/i.test(definitionPath ?? '')) return 'high-stakes';
+  return 'standard';
+}
+
 export function defaultCapabilityProfileForDivision(
   division: AgencyDivision,
   risk: AgencyRisk = 'standard',
@@ -250,4 +275,22 @@ export function resolveAgencyCapabilityGrant(
     permissionMode: granted.has('workspace-write') ? 'host-default' : 'plan',
     explanation,
   };
+}
+
+export function resolveAgencyCapabilityForDefinition(request: {
+  readonly definitionPath: string | undefined;
+  readonly missionAccessMode: 'read-only' | 'workspace-write';
+  readonly implementationAssigned: boolean;
+  readonly securityAuthorized?: boolean | undefined;
+}): EffectiveCapabilityGrant | undefined {
+  const division = agencyDivisionFromDefinitionPath(request.definitionPath);
+  const risk = agencyRiskFromDefinitionPath(request.definitionPath, division);
+  if (division === undefined || risk === undefined) return undefined;
+  return resolveAgencyCapabilityGrant({
+    division,
+    risk,
+    missionAccessMode: request.missionAccessMode,
+    implementationAssigned: request.implementationAssigned,
+    securityAuthorized: request.securityAuthorized,
+  });
 }
