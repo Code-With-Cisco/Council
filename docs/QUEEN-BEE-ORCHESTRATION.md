@@ -45,6 +45,14 @@ Imported Agency definitions describe expertise. They do not own runtime authorit
 
 `destructive-operation` and `persistent-memory` are never self-granted by an imported persona.
 
+### Runtime enforcement and activation
+
+Capability enforcement is active whenever Council launches a definition whose path is inside an `agency-agents/<division>/` catalog. It is not enabled by a separate feature flag: both ordinary Agency launches and Mission launches are narrowed at the privileged provider boundary before the process starts. Non-Agency definitions continue to use their existing lifecycle contract.
+
+Council intersects an Agency definition's declared tools with the host grant, emits explicit provider denials for every mapped capability the grant withholds, and forces read-only grants into plan mode. Engineering implementation tools are available only for an explicit `workspace-write` Mission assignment. High-stakes definitions remain non-writing, and security definitions remain non-writing/non-command until a separate authorization boundary is implemented; absence of that authorization fails closed.
+
+The safe operational disable path is to remove the Agency catalog from the selected workspace (which makes those definitions unavailable) or revert the capability-enforcement change. There is no runtime switch that silently restores imported frontmatter as authority.
+
 ## Authorship and repository ownership
 
 Repository authorship belongs to Cisco. Agents are tools used by the repository owner, not contributors or co-authors.

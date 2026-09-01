@@ -659,4 +659,125 @@ describe('ClaudeCodeAgentSupervisor lifecycle actions', () => {
       subject.current?.roster.unassigned.map((session) => session.id),
     ).toContain('unrelated-failed');
   });
+
+  it.each([
+    {
+      division: 'engineering',
+      accessMode: 'read-only' as const,
+      expectsImplementationTools: false,
+    },
+    {
+      division: 'engineering',
+      accessMode: 'workspace-write' as const,
+      expectsImplementationTools: true,
+    },
+    {
+      division: 'healthcare',
+      accessMode: 'workspace-write' as const,
+      expectsImplementationTools: false,
+    },
+    {
+      division: 'security',
+      accessMode: 'workspace-write' as const,
+      expectsImplementationTools: false,
+    },
+  ])(
+    'enforces the host capability grant at provider launch for $division/$accessMode',
+    async ({ division, accessMode, expectsImplementationTools }) => {
+      const workspaceRoot = await temporaryWorkspace();
+      const definitionPath = path.join(
+        workspaceRoot,
+        '.claude',
+        'agents',
+        'agency-agents',
+        division,
+        `${division}-specialist.md`,
+      );
+      const entry = catalogEntry(workspaceRoot, {
+        catalogId: `catalog_${division}_specialist`,
+        agentName: `${division}-specialist`,
+        label: `${division} specialist`,
+        definitionPath,
+        canonicalDefinitionPath: definitionPath,
+        hidden: false,
+        mode: 'normal',
+        metadata: {
+          model: undefined,
+          tools: [
+            'Read',
+            'Glob',
+            'Grep',
+            'WebSearch',
+            'WebFetch',
+            'Write',
+            'Edit',
+            'NotebookEdit',
+            'PowerShell',
+            'Task',
+            'SendMessage',
+          ],
+          disallowedTools: undefined,
+          permissionMode: 'default',
+          maxTurns: undefined,
+          memory: undefined,
+          effort: undefined,
+          skills: undefined,
+        },
+      });
+      const resolvedCatalog = catalog(workspaceRoot, [entry]);
+      const profiles = resolveProfiles(
+        { version: 2, members: [], pollIntervalMs: 10_000 },
+        resolvedCatalog,
+      );
+      const profile = profiles.config.members[0]!;
+      const fake = lifecycleClient();
+      const store = await bindingStore(workspaceRoot);
+      const subject = supervisor(
+        workspaceRoot,
+        fake.client,
+        store,
+        resolvedCatalog,
+        profiles.config,
+        profiles.validations,
+      );
+
+      const result = await subject.startMissionMember(
+        profile.key,
+        `execution-${division}-${accessMode}`,
+        fingerprint,
+        'Complete the bounded assignment.',
+        workspaceRoot,
+        accessMode,
+        profile.key,
+      );
+
+      expect(result.ok, !result.ok ? result.message : '').toBe(true);
+      const request = fake.starts.mock.calls[0]?.[0];
+      expect(request).toBeDefined();
+      expect(request?.allowedTools).toEqual(
+        expect.arrayContaining(['Read', 'Glob', 'Grep']),
+      );
+      if (expectsImplementationTools) {
+        expect(request?.allowedTools).toEqual(
+          expect.arrayContaining(['Write', 'Edit', 'PowerShell']),
+        );
+        expect(request?.disallowedTools).not.toContain('Write');
+        expect(request?.disallowedTools).not.toContain('PowerShell');
+        expect(request?.permissionMode).toBeUndefined();
+      } else {
+        expect(request?.allowedTools).not.toContain('Write');
+        expect(request?.allowedTools).not.toContain('PowerShell');
+        expect(request?.disallowedTools).toEqual(
+          expect.arrayContaining([
+            'Write',
+            'Edit',
+            'NotebookEdit',
+            'Bash',
+            'PowerShell',
+          ]),
+        );
+        expect(request?.permissionMode).toBe('plan');
+      }
+    },
+  );
 });

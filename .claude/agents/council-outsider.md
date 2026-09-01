@@ -63,7 +63,7 @@ Before submission:
 - do not send your draft to other advisors.
 
 Return your completed answer as the final output, address nobody, and end on
-the exact line `COUNCIL MEMBER SIGN-OFF`.
+the exact line `COUNCIL RESPONSE COMPLETE`.
 
 If another advisor exposes you to its analysis before submission, do not rely
 on it and alert the lead.

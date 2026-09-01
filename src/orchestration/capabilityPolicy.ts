@@ -70,6 +70,11 @@ export interface EffectiveCapabilityGrant {
   readonly explanation: readonly string[];
 }
 
+export interface ProviderToolPolicy {
+  readonly allowedTools: readonly string[];
+  readonly disallowedTools: readonly string[];
+}
+
 const ALL_HOST_CAPABILITIES: readonly HostCapability[] = [
   'workspace-read',
   'workspace-search',
@@ -293,4 +298,44 @@ export function resolveAgencyCapabilityForDefinition(request: {
     implementationAssigned: request.implementationAssigned,
     securityAuthorized: request.securityAuthorized,
   });
+}
+
+const CLAUDE_TOOLS_BY_CAPABILITY: Readonly<
+  Partial<Record<HostCapability, readonly string[]>>
+> = {
+  'workspace-read': ['Read'],
+  'workspace-search': ['Glob', 'Grep'],
+  'web-research': ['WebSearch', 'WebFetch'],
+  'workspace-write': ['Write', 'Edit', 'NotebookEdit'],
+  'command-execution': ['Bash', 'PowerShell'],
+  delegation: ['Task', 'SendMessage'],
+};
+
+/**
+ * Translates the provider-neutral host grant into the narrow Claude CLI tool
+ * selectors enforced at process launch. Denials are emitted explicitly so a
+ * broader agent definition or user setting cannot silently restore authority.
+ */
+export function providerToolPolicyForGrant(
+  grant: EffectiveCapabilityGrant,
+): ProviderToolPolicy {
+  const allowedTools = new Set<string>();
+  const disallowedTools = new Set<string>();
+
+  for (const capability of grant.granted) {
+    for (const tool of CLAUDE_TOOLS_BY_CAPABILITY[capability] ?? []) {
+      allowedTools.add(tool);
+    }
+  }
+  for (const capability of grant.denied) {
+    for (const tool of CLAUDE_TOOLS_BY_CAPABILITY[capability] ?? []) {
+      disallowedTools.add(tool);
+    }
+  }
+  for (const tool of disallowedTools) allowedTools.delete(tool);
+
+  return {
+    allowedTools: [...allowedTools],
+    disallowedTools: [...disallowedTools],
+  };
 }

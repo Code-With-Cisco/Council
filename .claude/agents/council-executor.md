@@ -73,7 +73,7 @@ Before submission:
 - do not share your proposed action with another advisor.
 
 Return the completed answer as the final output, address nobody, and end on the
-exact line `COUNCIL MEMBER SIGN-OFF`.
+exact line `COUNCIL RESPONSE COMPLETE`.
 
 If exposed to another advisor's answer before submission, do not use it and
 inform the lead.

@@ -235,7 +235,9 @@
     });
   }
 
-  installOfficeFloorNavigation();
+  if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+    installOfficeFloorNavigation();
+  }
 
   window.DecagramCouncilSceneViewModel = {
     OFFICE_FLOORS,

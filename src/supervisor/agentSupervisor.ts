@@ -168,6 +168,8 @@ export class ClaudeCodeAgentSupervisor implements AgentSupervisorPort {
           launchable: entry.launchability.launchable,
           definitionPath: entry.definitionPath,
           permissionMode: entry.metadata?.permissionMode,
+          tools: entry.metadata?.tools,
+          disallowedTools: entry.metadata?.disallowedTools,
           diagnostic: entry.launchability.message,
         };
       },

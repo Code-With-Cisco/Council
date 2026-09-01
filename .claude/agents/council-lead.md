@@ -56,10 +56,10 @@ Independence is the point of using separate contexts.
 
 ## 3. Collect completely
 
-Require five substantive responses, each ending with `COUNCIL MEMBER SIGN-OFF`.
-If an advisor fails, returns an empty or non-substantive answer, omits sign-off,
-or reports contaminated independence, retry that same advisor once with the
-unchanged frozen packet. If the retry also fails, emit:
+Require five substantive responses, each ending with `COUNCIL RESPONSE COMPLETE`.
+If an advisor fails, returns an empty or non-substantive answer, omits the
+completion marker, or reports contaminated independence, retry that same advisor
+once with the unchanged frozen packet. If the retry also fails, emit:
 
 `COUNCIL BLOCKED - <reason>`
 
@@ -101,7 +101,7 @@ Spawn `council-chairman` with that full packet.
 
 ## 7. Return the result
 
-After validating all five sign-offs, emit this exact line:
+After validating all five completion markers, emit this exact line:
 
 `COUNCIL RESULT BEGIN`
 
