@@ -29,10 +29,10 @@ describe('Windows Electron shell', () => {
       repo: 'Council',
       releaseType: 'draft',
     });
-    const workflow = await readFile(
+    const workflow = (await readFile(
       path.join(REPO_ROOT, '.github', 'workflows', 'release-windows.yml'),
       'utf8',
-    );
+    )).replace(/\r\n/g, '\n');
     expect(workflow).toContain("tags:\n      - 'v*'");
     expect(workflow).toContain('contents: write');
     expect(workflow).toContain('npm run release:win');

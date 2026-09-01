@@ -67,7 +67,7 @@ Before submitting:
 - do not share your draft with them.
 
 Return your response as the final output, address nobody, and end on the exact
-line `COUNCIL MEMBER SIGN-OFF`.
+line `COUNCIL RESPONSE COMPLETE`.
 
 If another advisor sends you substantive analysis before submission, do not use
 it and report the independence issue to the lead.

@@ -25,7 +25,8 @@ describe('council agent definitions', () => {
       expect(frontmatter?.['tools']).toBe('Read, Grep, Glob');
       expect(frontmatter?.['permissionMode']).toBeUndefined();
       expect(source).toContain('final output');
-      expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
+      expect(source).toContain('COUNCIL RESPONSE COMPLETE');
+      expect(source).not.toContain('COUNCIL MEMBER SIGN-OFF');
     }
   });
 
@@ -48,7 +49,8 @@ describe('council agent definitions', () => {
     expect(source).toContain('five substantive responses');
     expect(source).toContain('Response A');
     expect(source).toContain('chairman');
-    expect(source).toContain('COUNCIL MEMBER SIGN-OFF');
+    expect(source).toContain('COUNCIL RESPONSE COMPLETE');
+    expect(source).not.toContain('COUNCIL MEMBER SIGN-OFF');
     expect(source).toContain('independently started Claude sessions');
   });
 
@@ -86,5 +88,36 @@ describe('council dispatch argv', () => {
       'Council',
       question,
     ]);
+  });
+
+  it('places host capability restrictions before the prompt as single argv values', () => {
+    const argv = buildStartSessionArgv({
+      agent: 'engineering-specialist',
+      prompt: 'Inspect the bounded Mission.',
+      cwd: 'C:\\work\\Council',
+      allowedTools: ['Read', 'Glob', 'Read'],
+      disallowedTools: ['Write', 'Edit', 'Bash'],
+    });
+
+    expect(argv).toEqual([
+      '--bg',
+      '--agent',
+      'engineering-specialist',
+      '--allowedTools',
+      'Read,Glob',
+      '--disallowedTools',
+      'Write,Edit,Bash',
+      'Inspect the bounded Mission.',
+    ]);
+  });
+
+  it('rejects malformed capability selectors before process launch', () => {
+    expect(() =>
+      buildStartSessionArgv({
+        prompt: 'Inspect.',
+        cwd: 'C:\\work\\Council',
+        allowedTools: ['Read,Bash'],
+      }),
+    ).toThrow('Allowed tools contains an invalid tool selector.');
   });
 });

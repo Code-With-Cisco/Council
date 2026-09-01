@@ -10,6 +10,8 @@ layer.
 
 This repository is authored and maintained by Cisco.
 
+Council-authored commits use `Cisco <115424057+Code-With-Cisco@users.noreply.github.com>`. If that owner identity is unavailable, stop instead of substituting an agent, model, bot, vendor, or service identity.
+
 - Do not add `Co-authored-by` trailers, AI signatures, assistant credits, or text
   implying that an AI system is a repository author or maintainer.
 - Do not create automated commits under a bot identity for generated Council
@@ -47,10 +49,14 @@ Queen Bee owns Mission decomposition and final reconciliation, not implementatio
 Council departments are defined in `src/orchestration/departments.ts` and occupy
 stable office floors independent of provider session state.
 
+Use `docs/QUEEN-BEE-ORCHESTRATION.md` as the canonical runtime hierarchy and integration contract. Canonical executable policy lives in `src/orchestration/queenBee.ts`, `src/orchestration/readiness.ts`, `src/orchestration/destructivePolicy.ts`, and `src/orchestration/capabilityPolicy.ts`. Council remains the durable message transport when a provider cannot carry nested bounded packets directly.
+
 ## Specialist routing
 
 Consult `.agents/skills/department-router/SKILL.md` when a Mission benefits from
 domain specialization.
+
+The imported Agency catalog and the deprecated `agency-agents-router` entry point remain compatibility/research material only. They are not active policy. At the real provider launch boundary, Council intersects any imported definition with the host-owned capability grant and emits explicit denials; imported frontmatter never expands authority.
 
 - A Department Head may assign a professional specialty such as Frontend
   Developer, UX Researcher, Database Reliability Engineer, Financial Analyst, or

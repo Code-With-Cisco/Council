@@ -71,10 +71,12 @@ describe('department readiness', () => {
   });
 
   it('iterates when a required criterion lacks evidence', () => {
-    const missingEvidence = product();
-    missingEvidence.criterionAssessments[0] = {
-      ...missingEvidence.criterionAssessments[0]!,
-      evidence: [],
+    const source = product();
+    const missingEvidence: SpecialistWorkProduct = {
+      ...source,
+      criterionAssessments: source.criterionAssessments.map((assessment, index) =>
+        index === 0 ? { ...assessment, evidence: [] } : assessment,
+      ),
     };
 
     const result = evaluateDepartmentReadiness(assignment(), missingEvidence);
@@ -85,8 +87,10 @@ describe('department readiness', () => {
   });
 
   it('iterates while a blocking finding remains even if criteria are satisfied', () => {
-    const blocked = product();
-    blocked.blockingFindings = ['Dependency evidence is stale.'];
+    const blocked: SpecialistWorkProduct = {
+      ...product(),
+      blockingFindings: ['Dependency evidence is stale.'],
+    };
 
     const result = evaluateDepartmentReadiness(assignment(), blocked);
 
@@ -96,10 +100,12 @@ describe('department readiness', () => {
   });
 
   it('escalates rather than looping after the sixth unsuccessful iteration', () => {
-    const incomplete = product();
-    incomplete.criterionAssessments[1] = {
-      ...incomplete.criterionAssessments[1]!,
-      status: 'unsatisfied',
+    const source = product();
+    const incomplete: SpecialistWorkProduct = {
+      ...source,
+      criterionAssessments: source.criterionAssessments.map((assessment, index) =>
+        index === 1 ? { ...assessment, status: 'unsatisfied' } : assessment,
+      ),
     };
 
     const result = evaluateDepartmentReadiness(assignment(6), incomplete);
@@ -110,12 +116,46 @@ describe('department readiness', () => {
   });
 
   it('rejects a product from a different assignment', () => {
-    const mismatched = product();
-    mismatched.assignmentId = 'department_assignment_other';
+    const mismatched: SpecialistWorkProduct = {
+      ...product(),
+      assignmentId: 'department_assignment_other',
+    };
 
     const result = evaluateDepartmentReadiness(assignment(), mismatched);
 
     expect(result.ready).toBe(false);
     expect(result.reasons.join(' ')).toContain('different department assignment');
+  });
+
+  it('fails closed when acceptance criteria or deliverables are empty', () => {
+    const noCriteria: DepartmentAssignment = {
+      ...assignment(),
+      acceptanceCriteria: [],
+    };
+    expect(evaluateDepartmentReadiness(noCriteria, product())).toMatchObject({
+      ready: false,
+      criteriaComplete: false,
+    });
+
+    const noDeliverables: SpecialistWorkProduct = {
+      ...product(),
+      deliverables: [],
+    };
+    expect(evaluateDepartmentReadiness(assignment(), noDeliverables)).toMatchObject({
+      ready: false,
+      evidenceComplete: false,
+    });
+  });
+
+  it('requires criterion evidence to be present in the product evidence packet', () => {
+    const disconnectedEvidence: SpecialistWorkProduct = {
+      ...product(),
+      evidence: ['unrelated-evidence'],
+    };
+
+    const result = evaluateDepartmentReadiness(assignment(), disconnectedEvidence);
+
+    expect(result.ready).toBe(false);
+    expect(result.evidenceComplete).toBe(false);
   });
 });

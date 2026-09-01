@@ -12,6 +12,10 @@ import type {
 } from '../integration/types.js';
 import { detectUnknownAgentWarning } from '../integration/cli/errors.js';
 import { isValidProfileId } from '../profileIdentity.js';
+import {
+  providerToolPolicyForGrant,
+  resolveAgencyCapabilityForDefinition,
+} from '../orchestration/capabilityPolicy.js';
 import type { AgentProviderAdapter } from '../providers/contracts.js';
 import {
   resolveExactBindingSession,
@@ -29,7 +33,52 @@ export interface LaunchDefinitionResolution {
   readonly launchable: boolean;
   readonly definitionPath: string | undefined;
   readonly permissionMode?: string | undefined;
+  readonly tools?: string | readonly string[] | undefined;
+  readonly disallowedTools?: string | readonly string[] | undefined;
   readonly diagnostic?: string | undefined;
+}
+
+function normalizedCatalogTools(
+  value: string | readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  const raw = typeof value === 'string' ? value.split(',') : value;
+  return [...new Set(raw.map((tool) => tool.trim()).filter(Boolean))];
+}
+
+function agencyLaunchToolPolicy(
+  definition: LaunchDefinitionResolution,
+  options: StartProfileOptions,
+): {
+  readonly allowedTools: readonly string[];
+  readonly disallowedTools: readonly string[];
+  readonly permissionMode: 'plan' | undefined;
+} | undefined {
+  const grant = resolveAgencyCapabilityForDefinition({
+    definitionPath: definition.definitionPath,
+    missionAccessMode: options.missionAccessMode ?? 'read-only',
+    implementationAssigned:
+      options.missionExecutionId !== undefined &&
+      options.missionAccessMode === 'workspace-write',
+    securityAuthorized: false,
+  });
+  if (grant === undefined) return undefined;
+
+  const host = providerToolPolicyForGrant(grant);
+  const declaredAllowed = normalizedCatalogTools(definition.tools);
+  const declaredDenied = normalizedCatalogTools(definition.disallowedTools) ?? [];
+  const allowedTools =
+    declaredAllowed === undefined
+      ? [...host.allowedTools]
+      : host.allowedTools.filter((tool) => declaredAllowed.includes(tool));
+  const disallowedTools = [
+    ...new Set([...host.disallowedTools, ...declaredDenied]),
+  ];
+  return {
+    allowedTools: allowedTools.filter((tool) => !disallowedTools.includes(tool)),
+    disallowedTools,
+    permissionMode: grant.permissionMode === 'plan' ? 'plan' : undefined,
+  };
 }
 
 export interface LaunchWorkspace {
@@ -925,6 +974,10 @@ export class SafeLaunchCoordinator {
       );
     }
 
+    const agencyToolPolicy = agencyLaunchToolPolicy(
+      launchDefinition,
+      startOptions,
+    );
     const result = await this.options.provider.startSession({
       agent: launchDefinition.agentName,
       name: uniqueLaunchName,
@@ -937,8 +990,15 @@ export class SafeLaunchCoordinator {
       effort: launchProfile.effort,
       permissionMode:
         startOptions.permissionModeOverride ??
-        launchProfile.permissionMode ??
-        launchDefinition.permissionMode,
+        (agencyToolPolicy === undefined
+          ? launchProfile.permissionMode ?? launchDefinition.permissionMode
+          : agencyToolPolicy.permissionMode),
+      ...(agencyToolPolicy === undefined
+        ? {}
+        : {
+            allowedTools: agencyToolPolicy.allowedTools,
+            disallowedTools: agencyToolPolicy.disallowedTools,
+          }),
     });
 
     if (!result.ok) {
