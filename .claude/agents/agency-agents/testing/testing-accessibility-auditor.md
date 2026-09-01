@@ -4,12 +4,16 @@ description: Expert accessibility specialist who audits interfaces against WCAG 
 color: "#0077B6"
 emoji: ♿
 vibe: If it's not tested with a screen reader, it's not accessible.
+tools: Read, Grep, Glob, PowerShell
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:testing/testing-accessibility-auditor.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: native-review
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

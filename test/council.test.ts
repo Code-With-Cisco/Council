@@ -89,4 +89,35 @@ describe('council dispatch argv', () => {
       question,
     ]);
   });
+
+  it('places host capability restrictions before the prompt as single argv values', () => {
+    const argv = buildStartSessionArgv({
+      agent: 'engineering-specialist',
+      prompt: 'Inspect the bounded Mission.',
+      cwd: 'C:\\work\\Council',
+      allowedTools: ['Read', 'Glob', 'Read'],
+      disallowedTools: ['Write', 'Edit', 'Bash'],
+    });
+
+    expect(argv).toEqual([
+      '--bg',
+      '--agent',
+      'engineering-specialist',
+      '--allowedTools',
+      'Read,Glob',
+      '--disallowedTools',
+      'Write,Edit,Bash',
+      'Inspect the bounded Mission.',
+    ]);
+  });
+
+  it('rejects malformed capability selectors before process launch', () => {
+    expect(() =>
+      buildStartSessionArgv({
+        prompt: 'Inspect.',
+        cwd: 'C:\\work\\Council',
+        allowedTools: ['Read,Bash'],
+      }),
+    ).toThrow('Allowed tools contains an invalid tool selector.');
+  });
 });

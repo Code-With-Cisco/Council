@@ -4,12 +4,16 @@ description: Blender tooling specialist - Builds Python add-ons, asset validator
 color: blue
 emoji: 🧩
 vibe: Turns repetitive Blender pipeline work into reliable one-click tools that artists actually use.
+tools: Read, Grep, Glob, Edit, Write, PowerShell
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:game-development/blender/blender-addon-engineer.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: engineering
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

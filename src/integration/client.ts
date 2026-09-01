@@ -41,6 +41,10 @@ export interface StartSessionRequest {
   readonly model?: string | undefined;
   readonly effort?: string | undefined;
   readonly permissionMode?: string | undefined;
+  /** Council-owned per-launch additions to the host allow policy. */
+  readonly allowedTools?: readonly string[] | undefined;
+  /** Council-owned per-launch deny policy. Denies narrow any definition/settings grants. */
+  readonly disallowedTools?: readonly string[] | undefined;
 }
 
 /**
@@ -71,6 +75,23 @@ export interface ClaudeClientOptions {
   readonly defaultTimeoutMs?: number | undefined;
 }
 
+function normalizedToolList(values: readonly string[] | undefined, label: string): string[] {
+  if (values === undefined) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim();
+    if (value === '' || /[\u0000-\u001f\u007f,]/.test(value) || value.length > 512) {
+      throw new Error(`${label} contains an invalid tool selector.`);
+    }
+    if (!seen.has(value)) {
+      seen.add(value);
+      result.push(value);
+    }
+  }
+  return result;
+}
+
 export function buildStartSessionArgv(request: StartSessionRequest): string[] {
   if (request.prompt.trim() === '') {
     throw new Error('start() requires a non-empty prompt');
@@ -82,6 +103,10 @@ export function buildStartSessionArgv(request: StartSessionRequest): string[] {
   if (request.model !== undefined) argv.push('--model', request.model);
   if (request.effort !== undefined) argv.push('--effort', request.effort);
   if (request.permissionMode !== undefined) argv.push('--permission-mode', request.permissionMode);
+  const allowedTools = normalizedToolList(request.allowedTools, 'Allowed tools');
+  const disallowedTools = normalizedToolList(request.disallowedTools, 'Disallowed tools');
+  if (allowedTools.length > 0) argv.push('--allowedTools', allowedTools.join(','));
+  if (disallowedTools.length > 0) argv.push('--disallowedTools', disallowedTools.join(','));
   argv.push(request.prompt);
   return argv;
 }

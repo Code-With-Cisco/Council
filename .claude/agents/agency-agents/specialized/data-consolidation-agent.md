@@ -4,12 +4,16 @@ description: AI agent that consolidates extracted sales data into live reporting
 color: "#38a169"
 emoji: 🗄️
 vibe: Consolidates scattered sales data into live reporting dashboards.
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/data-consolidation-agent.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

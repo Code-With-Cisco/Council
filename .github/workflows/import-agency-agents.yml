@@ -3,15 +3,18 @@ name: Import Agency Agents
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - queen-bee-runtime
     paths:
       - .github/workflows/import-agency-agents.yml
+      - scripts/import-agency-agents.mjs
 
 permissions:
   contents: write
 
 concurrency:
-  group: agency-agents-import
+  group: agency-agents-import-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -44,6 +47,9 @@ jobs:
             echo 'Executable/config upstream content escaped the import boundary.' >&2
             exit 1
           fi
+          grep -q '"schemaVersion": 2' docs/agency-agents/manifest.json
+          grep -q '^permissionMode: plan$' .claude/agents/agency-agents/product/product-manager.md
+          grep -q '^disallowedTools: Agent$' .claude/agents/agency-agents/product/product-manager.md
 
       - name: Commit imported catalog
         shell: bash
@@ -53,11 +59,10 @@ jobs:
             echo 'Pinned Agency catalog already matches the reviewed snapshot.'
             exit 0
           fi
-          # Repository ownership policy: automated work is committed under Cisco's
-          # repository identity. Agents/bots must never claim authorship or ownership.
           git config user.name 'Cisco'
           git config user.email '115424057+Code-With-Cisco@users.noreply.github.com'
           git add .claude/agents/agency-agents docs/agency-agents
-          git commit -m 'Import pinned Agency Agents catalog'
-          git pull --rebase origin main
-          git push origin HEAD:main
+          git commit -m 'Refresh pinned Agency Agents catalog'
+          branch="${GITHUB_REF_NAME}"
+          git pull --rebase origin "$branch"
+          git push origin "HEAD:$branch"

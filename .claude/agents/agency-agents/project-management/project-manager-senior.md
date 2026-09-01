@@ -4,12 +4,16 @@ description: Converts specs to tasks and remembers previous projects. Focused on
 color: blue
 emoji: 📝
 vibe: Converts specs to tasks with realistic scope — no gold-plating, no fantasy.
+tools: Read, Grep, Glob, WebFetch, WebSearch, Edit, Write
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:project-management/project-manager-senior.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: product-design
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

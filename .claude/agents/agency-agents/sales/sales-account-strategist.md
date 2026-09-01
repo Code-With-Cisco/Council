@@ -4,12 +4,16 @@ description: Expert post-sale account strategist specializing in land-and-expand
 color: "#2E7D32"
 emoji: 🗺️
 vibe: Maps the org, finds the whitespace, and turns customers into platforms.
+tools: Read, Grep, Glob, WebFetch, WebSearch, Edit, Write
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:sales/sales-account-strategist.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: content-growth
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

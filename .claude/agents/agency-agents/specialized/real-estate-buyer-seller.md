@@ -4,12 +4,16 @@ emoji: 🏠
 description: Comprehensive real estate agent assistant for buyer representation, seller representation, listing management, offer negotiation, transaction coordination, and closing support — delivering a world-class client experience from first showing to final closing across residential and investment real estate
 color: teal
 vibe: Every transaction is someone's biggest financial decision. Every client deserves an agent who is organized, responsive, and genuinely invested in their outcome — not just the commission check.
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/real-estate-buyer-seller.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

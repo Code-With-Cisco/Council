@@ -45,7 +45,7 @@ describe('Queen Bee hierarchy policy', () => {
       unresolvedQuestions: ['Which migration path is approved?'],
     });
 
-    expect(assessment.readinessPercent).toBe(100);
+    expect(assessment.readinessPercent).toBeLessThan(100);
     expect(assessment.readyForQueenBee).toBe(false);
   });
 
@@ -82,6 +82,11 @@ describe('Queen Bee hierarchy policy', () => {
 
   it('routes destructive or high-impact work to a user-reviewed branch', () => {
     expect(assessPromotionRisk({})).toEqual({
+      route: 'review-branch',
+      requiresUserApproval: true,
+      reasons: ['unknown-impact'],
+    });
+    expect(assessPromotionRisk({ impactKnown: true })).toEqual({
       route: 'direct-main',
       requiresUserApproval: false,
       reasons: [],

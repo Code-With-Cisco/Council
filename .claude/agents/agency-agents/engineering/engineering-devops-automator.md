@@ -4,12 +4,16 @@ description: Expert DevOps engineer specializing in infrastructure automation, C
 color: orange
 emoji: ⚙️
 vibe: Automates infrastructure so your team ships faster and sleeps better.
+tools: Read, Grep, Glob, Edit, Write, PowerShell
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:engineering/engineering-devops-automator.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: engineering
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

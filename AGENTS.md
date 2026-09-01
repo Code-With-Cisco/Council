@@ -17,6 +17,8 @@ Repository authorship and contributor attribution belong exclusively to Cisco / 
 
 The user-facing primary model is **Queen Bee**. Queen Bee may be Claude, Codex, or ChatGPT depending on the surface the user is currently using.
 
+Use `docs/QUEEN-BEE-ORCHESTRATION.md` as the canonical runtime hierarchy and integration contract. When a provider cannot transport nested agent messages directly, Council remains the transport and preserves the same bounded Mission packets and review state.
+
 When a request is complex enough to benefit from decomposition, consult `.agents/skills/queen-bee-orchestrator/SKILL.md` (or the Claude mirror) and route work through the department hierarchy:
 
 1. Queen Bee converts the conversation/request into one bounded Mission and decomposes it by responsibility.

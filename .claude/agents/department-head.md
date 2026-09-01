@@ -6,7 +6,7 @@ description: >-
   assignment from Queen Bee, selects the smallest useful specialist set,
   reviews specialist evidence, requests revisions, and returns work only after
   the deterministic department readiness contract reaches 100%.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, SendMessage
 model: sonnet
 maxTurns: 60
 effort: high

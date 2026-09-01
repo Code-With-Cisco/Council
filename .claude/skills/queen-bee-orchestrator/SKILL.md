@@ -29,6 +29,8 @@ Department floors and capability profiles are Council-owned metadata in:
 - `src/orchestration/departments.ts`
 - `src/orchestration/capabilityPolicy.ts`
 - `src/orchestration/hierarchy.ts`
+- `src/orchestration/readiness.ts`
+- `src/orchestration/destructivePolicy.ts`
 
 ## Workflow
 
@@ -60,17 +62,16 @@ The Department Head selects specialist(s), creates smaller assignments, and keep
 
 Specialists return findings/work to the Department Head. The Department Head reviews evidence and may return a bounded revision request to the responsible specialist.
 
-Do not use subjective claims such as "I am 100% certain." Council's 100% rule means the deterministic readiness contract in `assessDepartmentReadiness` is completely satisfied:
+Do not use subjective claims such as "I am 100% certain." Council's 100% rule means the canonical deterministic readiness contract in `src/orchestration/readiness.ts` is completely satisfied:
 
-- scope complete;
-- deliverables present;
+- specialist submission present;
+- requirements satisfied and scope preserved;
 - evidence attached;
 - acceptance criteria satisfied;
-- required validation passed;
-- material risks disclosed;
-- repository ownership/attribution policy satisfied;
+- required independent review passed or has an explicit not-applicable rationale;
+- Department Head attestation recorded;
 - zero unresolved blockers;
-- zero unresolved questions that materially affect the deliverable.
+- zero material uncertainties.
 
 Only then may the Department Head mark the output ready for Queen Bee.
 
@@ -88,7 +89,7 @@ If LLM Council or native gates identify material findings, route them back throu
 
 ### 7. Promotion decision
 
-Use the policy represented by `assessPromotionRisk`.
+Use the canonical policy in `src/orchestration/destructivePolicy.ts` represented by `assessIntegrationImpact`. `hierarchy.ts` exposes only a compatibility adapter and must fail closed when impact classification is missing.
 
 A review branch plus explicit user approval is mandatory for destructive or high-impact work, including history rewrites, data deletion, schema/data migrations, security-boundary changes, credential/secret changes, auth/permission changes, deployment/release changes, or any change the user explicitly wants to review.
 

@@ -1,5 +1,12 @@
 import type { AgencyDivision } from './capabilityPolicy.js';
 import { departmentById } from './departments.js';
+import {
+  assessDepartmentReadiness as assessCanonicalDepartmentReadiness,
+} from './readiness.js';
+import {
+  assessIntegrationImpact,
+  type ChangeImpactSignal,
+} from './destructivePolicy.js';
 
 export type DepartmentAssignmentState =
   | 'queued'
@@ -69,24 +76,39 @@ export function assessDepartmentReadiness(
   input: DepartmentReadinessInput,
 ): DepartmentReadinessAssessment {
   const byId = new Map(input.criteria.map((criterion) => [criterion.id, criterion]));
+  const satisfiedWithEvidence = (id: ReadinessCriterionId): boolean => {
+    const criterion = byId.get(id);
+    return criterion?.satisfied === true && criterion.evidence.length > 0;
+  };
   const missingCriteria = REQUIRED_READINESS_CRITERIA.filter(
-    (id) => byId.get(id)?.satisfied !== true,
+    (id) => !satisfiedWithEvidence(id),
   );
-  const satisfied = REQUIRED_READINESS_CRITERIA.length - missingCriteria.length;
-  const readinessPercent = Math.round(
-    (satisfied / REQUIRED_READINESS_CRITERIA.length) * 100,
-  );
-  const readyForQueenBee =
-    readinessPercent === 100 &&
-    input.unresolvedBlockers.length === 0 &&
-    input.unresolvedQuestions.length === 0;
+  const canonical = assessCanonicalDepartmentReadiness({
+    specialistSubmissionPresent: input.specialistProfileIds.length > 0,
+    requirementsSatisfied:
+      satisfiedWithEvidence('scope-complete') &&
+      satisfiedWithEvidence('deliverables-present'),
+    scopePreserved: satisfiedWithEvidence('scope-complete'),
+    evidenceAttached: satisfiedWithEvidence('evidence-attached'),
+    acceptance: {
+      status: satisfiedWithEvidence('acceptance-satisfied') ? 'passed' : 'failed',
+    },
+    independentReview: {
+      status: satisfiedWithEvidence('validation-passed') ? 'passed' : 'failed',
+    },
+    unresolvedBlockers: input.unresolvedBlockers,
+    materialUncertainties: input.unresolvedQuestions,
+    departmentHeadAttested:
+      satisfiedWithEvidence('risks-disclosed') &&
+      satisfiedWithEvidence('ownership-compliant'),
+  });
 
   return {
     department: input.department,
     departmentHead: departmentHeadProfileId(input.department),
     specialistProfileIds: [...new Set(input.specialistProfileIds)],
-    readinessPercent,
-    readyForQueenBee,
+    readinessPercent: canonical.readinessPercent,
+    readyForQueenBee: canonical.ready,
     missingCriteria,
     unresolvedBlockers: [...input.unresolvedBlockers],
     unresolvedQuestions: [...input.unresolvedQuestions],
@@ -122,6 +144,7 @@ export function createDepartmentDispatch(request: {
 }
 
 export type PromotionRiskReason =
+  | 'unknown-impact'
   | 'destructive-operation'
   | 'history-rewrite'
   | 'data-deletion'
@@ -136,6 +159,8 @@ export type PromotionRiskReason =
 export type PromotionRoute = 'direct-main' | 'review-branch';
 
 export interface PromotionAssessmentInput {
+  /** Explicitly true only after the caller has completed impact classification. */
+  readonly impactKnown?: boolean | undefined;
   readonly destructiveOperation?: boolean | undefined;
   readonly rewritesHistory?: boolean | undefined;
   readonly deletesData?: boolean | undefined;
@@ -164,21 +189,41 @@ export interface PromotionAssessment {
 export function assessPromotionRisk(
   input: PromotionAssessmentInput,
 ): PromotionAssessment {
-  const reasons: PromotionRiskReason[] = [];
-  if (input.destructiveOperation) reasons.push('destructive-operation');
-  if (input.rewritesHistory) reasons.push('history-rewrite');
-  if (input.deletesData) reasons.push('data-deletion');
-  if (input.migratesSchemaOrData) reasons.push('schema-or-data-migration');
-  if (input.changesSecurityBoundary) reasons.push('security-boundary-change');
-  if (input.changesCredentialsOrSecrets) reasons.push('credential-or-secret-change');
-  if (input.changesPermissionsOrAuth) reasons.push('permission-or-auth-change');
-  if (input.changesDeploymentOrRelease) reasons.push('deployment-or-release-change');
-  if (input.highImpact) reasons.push('high-impact-change');
-  if (input.userRequestedReview) reasons.push('explicit-user-review-request');
+  const mapped: Array<{
+    readonly reason: PromotionRiskReason;
+    readonly signal: ChangeImpactSignal;
+  }> = [];
+  const add = (
+    active: boolean | undefined,
+    reason: PromotionRiskReason,
+    kind: ChangeImpactSignal['kind'],
+  ): void => {
+    if (active) mapped.push({ reason, signal: { kind, detail: reason } });
+  };
+  add(input.destructiveOperation, 'destructive-operation', 'destructive-system-command');
+  add(input.rewritesHistory, 'history-rewrite', 'history-rewrite');
+  add(input.deletesData, 'data-deletion', 'irreversible-data-change');
+  add(input.migratesSchemaOrData, 'schema-or-data-migration', 'irreversible-data-change');
+  add(input.changesSecurityBoundary, 'security-boundary-change', 'security-policy-change');
+  add(input.changesCredentialsOrSecrets, 'credential-or-secret-change', 'credential-or-secret-change');
+  add(input.changesPermissionsOrAuth, 'permission-or-auth-change', 'access-control-change');
+  add(input.changesDeploymentOrRelease, 'deployment-or-release-change', 'production-mutation');
+  add(input.highImpact, 'high-impact-change', 'unknown-impact');
+  add(input.userRequestedReview, 'explicit-user-review-request', 'unknown-impact');
 
-  return reasons.length === 0
-    ? { route: 'direct-main', requiresUserApproval: false, reasons }
-    : { route: 'review-branch', requiresUserApproval: true, reasons };
+  const classified = input.impactKnown === true || mapped.length > 0;
+  const assessment = assessIntegrationImpact(
+    classified
+      ? mapped.map((entry) => entry.signal)
+      : [{ kind: 'unknown-impact', detail: 'Impact classification is incomplete.' }],
+  );
+  return {
+    route: assessment.disposition === 'direct-main' ? 'direct-main' : 'review-branch',
+    requiresUserApproval: assessment.requiresUserApproval,
+    reasons: classified
+      ? mapped.map((entry) => entry.reason)
+      : ['unknown-impact'],
+  };
 }
 
 export interface QueenBeeReconciliationInput {

@@ -4,12 +4,16 @@ description: Full-spectrum study abroad planning expert covering the US, UK, Can
 color: "#1B4D3E"
 emoji: 🎓
 vibe: Guides Chinese students through the entire study abroad journey — from school selection and essays to visas — with data-driven advice and zero anxiety selling.
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/study-abroad-advisor.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

@@ -4,12 +4,16 @@ description: Strategic GIS advisor who translates business problems into geospat
 color: navy
 emoji: 🧠
 vibe: The strategist who connects business pain points with geospatial solutions that actually deliver ROI.
+tools: Read, Grep, Glob, WebFetch, WebSearch
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:gis/gis-technical-consultant.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: research
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

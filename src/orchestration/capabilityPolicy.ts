@@ -70,6 +70,11 @@ export interface EffectiveCapabilityGrant {
   readonly explanation: readonly string[];
 }
 
+export interface ProviderToolPolicy {
+  readonly allowedTools: readonly string[];
+  readonly disallowedTools: readonly string[];
+}
+
 const ALL_HOST_CAPABILITIES: readonly HostCapability[] = [
   'workspace-read',
   'workspace-search',
@@ -80,6 +85,8 @@ const ALL_HOST_CAPABILITIES: readonly HostCapability[] = [
   'destructive-operation',
   'persistent-memory',
 ];
+
+const AGENCY_DIVISION_SET = new Set<string>(AGENCY_DIVISIONS);
 
 export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, CapabilityProfile>> = {
   advisory: {
@@ -193,6 +200,29 @@ const DIVISION_DEFAULTS: Readonly<Record<AgencyDivision, CapabilityProfileId>> =
   testing: 'native-review',
 };
 
+export function agencyDivisionFromDefinitionPath(
+  definitionPath: string | undefined,
+): AgencyDivision | undefined {
+  if (definitionPath === undefined) return undefined;
+  const normalized = definitionPath.replace(/\\/g, '/').toLowerCase();
+  const match = /\/agency-agents\/([^/]+)\//.exec(normalized);
+  const candidate = match?.[1];
+  return candidate !== undefined && AGENCY_DIVISION_SET.has(candidate)
+    ? (candidate as AgencyDivision)
+    : undefined;
+}
+
+export function agencyRiskFromDefinitionPath(
+  definitionPath: string | undefined,
+  division = agencyDivisionFromDefinitionPath(definitionPath),
+): AgencyRisk | undefined {
+  if (division === undefined) return undefined;
+  if (division === 'security') return 'restricted-security';
+  if (division === 'healthcare' || division === 'finance') return 'high-stakes';
+  if (/legal|compliance|privacy/i.test(definitionPath ?? '')) return 'high-stakes';
+  return 'standard';
+}
+
 export function defaultCapabilityProfileForDivision(
   division: AgencyDivision,
   risk: AgencyRisk = 'standard',
@@ -249,5 +279,63 @@ export function resolveAgencyCapabilityGrant(
     denied,
     permissionMode: granted.has('workspace-write') ? 'host-default' : 'plan',
     explanation,
+  };
+}
+
+export function resolveAgencyCapabilityForDefinition(request: {
+  readonly definitionPath: string | undefined;
+  readonly missionAccessMode: 'read-only' | 'workspace-write';
+  readonly implementationAssigned: boolean;
+  readonly securityAuthorized?: boolean | undefined;
+}): EffectiveCapabilityGrant | undefined {
+  const division = agencyDivisionFromDefinitionPath(request.definitionPath);
+  const risk = agencyRiskFromDefinitionPath(request.definitionPath, division);
+  if (division === undefined || risk === undefined) return undefined;
+  return resolveAgencyCapabilityGrant({
+    division,
+    risk,
+    missionAccessMode: request.missionAccessMode,
+    implementationAssigned: request.implementationAssigned,
+    securityAuthorized: request.securityAuthorized,
+  });
+}
+
+const CLAUDE_TOOLS_BY_CAPABILITY: Readonly<
+  Partial<Record<HostCapability, readonly string[]>>
+> = {
+  'workspace-read': ['Read'],
+  'workspace-search': ['Glob', 'Grep'],
+  'web-research': ['WebSearch', 'WebFetch'],
+  'workspace-write': ['Write', 'Edit', 'NotebookEdit'],
+  'command-execution': ['Bash', 'PowerShell'],
+  delegation: ['Task', 'SendMessage'],
+};
+
+/**
+ * Translates the provider-neutral host grant into the narrow Claude CLI tool
+ * selectors enforced at process launch. Denials are emitted explicitly so a
+ * broader agent definition or user setting cannot silently restore authority.
+ */
+export function providerToolPolicyForGrant(
+  grant: EffectiveCapabilityGrant,
+): ProviderToolPolicy {
+  const allowedTools = new Set<string>();
+  const disallowedTools = new Set<string>();
+
+  for (const capability of grant.granted) {
+    for (const tool of CLAUDE_TOOLS_BY_CAPABILITY[capability] ?? []) {
+      allowedTools.add(tool);
+    }
+  }
+  for (const capability of grant.denied) {
+    for (const tool of CLAUDE_TOOLS_BY_CAPABILITY[capability] ?? []) {
+      disallowedTools.add(tool);
+    }
+  }
+  for (const tool of disallowedTools) allowedTools.delete(tool);
+
+  return {
+    allowedTools: [...allowedTools],
+    disallowedTools: [...disallowedTools],
   };
 }

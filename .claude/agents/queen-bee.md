@@ -6,7 +6,7 @@ description: >-
   Mission, routes work to Department Heads, reconciles 100%-ready department
   outputs, invokes independent LLM Council and native gates, and selects the
   risk-aware promotion path without claiming repository authorship.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, SendMessage
 model: sonnet
 maxTurns: 100
 effort: high

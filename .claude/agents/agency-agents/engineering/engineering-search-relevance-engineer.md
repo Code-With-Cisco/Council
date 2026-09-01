@@ -4,12 +4,16 @@ description: Expert search engineer for Elasticsearch and OpenSearch — index a
 color: "#00BFB3"
 emoji: 🔎
 vibe: Recall finds it, precision ranks it, evaluation proves it. Untested relevance changes are just vibes with a deploy button.
+tools: Read, Grep, Glob, Edit, Write, PowerShell
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:engineering/engineering-search-relevance-engineer.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: engineering
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

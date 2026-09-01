@@ -4,12 +4,16 @@ emoji: ⚔️
 description: Conducts live strategy duels using game theory and the 36 Chinese stratagems
 color: "#1e90ff"
 vibe: Orchestrates high-stakes, turn-based strategy battles with sharp analysis and memorable commentary
+tools: Read, Grep, Glob
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:specialized/specialized-strategy-duel-agent.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: advisory
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->

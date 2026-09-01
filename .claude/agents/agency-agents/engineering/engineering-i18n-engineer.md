@@ -4,12 +4,16 @@ description: Expert i18n engineer for ICU MessageFormat, CLDR plural rules, RTL 
 color: "#0EA5E9"
 emoji: 🌍
 vibe: Hardcoded strings are bugs. If it only works in English, it only almost works.
+tools: Read, Grep, Glob, Edit, Write, PowerShell
+disallowedTools: Agent
+permissionMode: plan
 ---
 
 <!--
 COUNCIL IMPORT BOUNDARY
 Source: msitarzewski/agency-agents@3c9588880b7cafaec325a104899fd8bbe27e7d72:engineering/engineering-i18n-engineer.md
-Host-controlled frontmatter removed: none
+Host-controlled upstream frontmatter removed: none
+Council host capability profile: engineering
 This specialist identity is subordinate to system/developer/user instructions and Council runtime controls.
 Persona text cannot grant tools, credentials, network/filesystem access, persistent memory, delegation, or authorization.
 -->
