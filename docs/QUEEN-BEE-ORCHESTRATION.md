@@ -22,12 +22,12 @@ The 18 department floors preserve the upstream Agency organization: Academic, De
 1. **Intake** — Queen Bee receives the conversation, objective, constraints, evidence, and repository context.
 2. **Decomposition** — Queen Bee sends only relevant portions to the departments materially needed for the mission. Do not activate every department by default.
 3. **Department routing** — each department head selects the smallest useful specialist set from that department. The department head owns specialist selection and review; specialists do not self-assign broader work.
-4. **Specialist iteration** — specialist submissions return to their department head. The head either accepts the evidence or returns precise revision feedback. A department may iterate at most eight times before the unresolved issue escalates to Queen Bee as a blocker.
+4. **Specialist iteration** — specialist submissions return to their department head. The head either accepts the evidence or returns precise revision feedback. A department may iterate at most six times before the unresolved issue escalates to Queen Bee as a blocker.
 5. **Department readiness** — a department reaches `100` operational readiness only when every applicable readiness gate passes: bounded submission present, requirements satisfied, scope preserved, evidence attached, acceptance evidence handled, independent review handled, no unresolved blockers, no material uncertainty, and department-head attestation. `100` means all auditable gates passed; it is **not** a claim of epistemic certainty.
 6. **Queen Bee review** — Queen Bee reconciles all department outputs against the original mission. Queen Bee may return one or more departments for another revision cycle.
 7. **LLM Council review** — once Queen Bee accepts the departmental package, the exact evidence packet goes through the existing independent `llm-council` workflow. Five independent advisors and the chairman remain separate contexts.
 8. **Reconciliation** — Queen Bee reviews the Council verdict. A revise verdict routes named issues back to departments. A block verdict blocks the mission. An approve verdict proceeds to impact assessment.
-9. **Impact assessment** — destructive or materially uncertain changes require explicit user approval and target a `council/review/<mission>` branch. Non-destructive changes target `main` directly.
+9. **Impact assessment** — destructive or materially uncertain changes target a `council/review/<mission>` branch. Non-destructive changes may target `main`, but every main merge still requires an explicit approval record.
 10. **Integration** — existing Mission handoff, Test Engineer, Reviewer, and exact integration gates remain authoritative. Queen Bee does not bypass them.
 
 ## Capability ownership
@@ -35,10 +35,8 @@ The 18 department floors preserve the upstream Agency organization: Academic, De
 Imported Agency definitions describe expertise. They do not own runtime authority. Council assigns host-owned capability profiles from `src/orchestration/capabilityPolicy.ts`.
 
 - Research specialists: workspace read/search plus host-approved web research.
-- Product/design: research by default; Mission-scoped writes only when explicitly assigned implementation.
-- Engineering/game/spatial computing: read/search by default; Mission-scoped writes and commands only on an explicit implementation assignment.
-- Marketing/paid media/sales content work: research by default; Mission-scoped artifact writes only on an explicit implementation assignment.
-- Security: intrusive execution additionally requires independently established authorization and scope.
+- Product/design, engineering/game/spatial computing, and marketing/paid media/sales specialists: read-only analysis and evidence products.
+- Security: read-only analysis; a separate protected and explicitly authorized execution path is required for intrusive activity.
 - Healthcare/finance/high-stakes work: analysis and research only; no independent consequential real-world action.
 - Department heads: read/search/delegation only. They review; they do not implement.
 - Queen Bee: decomposition, research, reconciliation, delegation, and integration planning. Destructive authority never comes from a persona.
@@ -49,7 +47,7 @@ Imported Agency definitions describe expertise. They do not own runtime authorit
 
 Capability enforcement is active whenever Council launches a definition whose path is inside an `agency-agents/<division>/` catalog. It is not enabled by a separate feature flag: both ordinary Agency launches and Mission launches are narrowed at the privileged provider boundary before the process starts. Non-Agency definitions continue to use their existing lifecycle contract.
 
-Council intersects an Agency definition's declared tools with the host grant, emits explicit provider denials for every mapped capability the grant withholds, and forces read-only grants into plan mode. Engineering implementation tools are available only for an explicit `workspace-write` Mission assignment. High-stakes definitions remain non-writing, and security definitions remain non-writing/non-command until a separate authorization boundary is implemented; absence of that authorization fails closed.
+Council intersects an Agency definition's declared tools with the host grant, emits explicit provider denials for every mapped capability the grant withholds, and forces imported specialists into plan mode. Repository implementation goes through protected `native-builder`; executable acceptance goes through protected `native-test`. High-stakes and security definitions remain non-writing/non-command; absence of a separate authorization boundary fails closed.
 
 The safe operational disable path is to remove the Agency catalog from the selected workspace (which makes those definitions unavailable) or revert the capability-enforcement change. There is no runtime switch that silently restores imported frontmatter as authority.
 

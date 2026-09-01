@@ -21,18 +21,19 @@ export const AGENCY_DIVISIONS = [
 
 export type AgencyDivision = (typeof AGENCY_DIVISIONS)[number];
 export type AgencyRisk = 'standard' | 'restricted-security' | 'high-stakes';
+export const DEPARTMENT_IDS = AGENCY_DIVISIONS;
+export type DepartmentId = AgencyDivision;
+export type DepartmentRisk = AgencyRisk;
 
 export type CapabilityProfileId =
-  | 'advisory'
-  | 'research'
-  | 'product-design'
-  | 'engineering'
-  | 'content-growth'
+  | 'specialist-local'
+  | 'specialist-research'
   | 'restricted-security'
   | 'high-stakes'
   | 'department-head'
   | 'queen-bee'
   | 'native-builder'
+  | 'native-test'
   | 'native-review';
 
 export type HostCapability =
@@ -54,11 +55,18 @@ export interface CapabilityProfile {
   readonly requiresSecurityAuthorization: boolean;
 }
 
-export interface CapabilityResolutionInput {
+export interface AgencyCapabilityResolutionInput {
   readonly division: AgencyDivision;
   readonly risk: AgencyRisk;
   readonly missionAccessMode: 'read-only' | 'workspace-write';
   readonly implementationAssigned: boolean;
+  readonly securityAuthorized?: boolean | undefined;
+}
+
+export interface CapabilityResolutionInput {
+  readonly profileId: CapabilityProfileId;
+  readonly missionAccessMode: 'read-only' | 'workspace-write';
+  readonly implementationAssigned?: boolean | undefined;
   readonly securityAuthorized?: boolean | undefined;
 }
 
@@ -89,43 +97,19 @@ const ALL_HOST_CAPABILITIES: readonly HostCapability[] = [
 const AGENCY_DIVISION_SET = new Set<string>(AGENCY_DIVISIONS);
 
 export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, CapabilityProfile>> = {
-  advisory: {
-    id: 'advisory',
-    description: 'Read-only specialist analysis inside the assigned evidence boundary.',
+  'specialist-local': {
+    id: 'specialist-local',
+    description: 'Read-only domain analysis inside the assigned Mission evidence boundary.',
     baseline: ['workspace-read', 'workspace-search'],
     missionWriteEligible: false,
     commandExecutionEligible: false,
     requiresSecurityAuthorization: false,
   },
-  research: {
-    id: 'research',
-    description: 'Read-only workspace analysis plus host-approved public research.',
+  'specialist-research': {
+    id: 'specialist-research',
+    description: 'Read-only domain analysis plus host-approved public research.',
     baseline: ['workspace-read', 'workspace-search', 'web-research'],
     missionWriteEligible: false,
-    commandExecutionEligible: false,
-    requiresSecurityAuthorization: false,
-  },
-  'product-design': {
-    id: 'product-design',
-    description: 'Product/design analysis with write access only inside an explicitly assigned Mission worktree.',
-    baseline: ['workspace-read', 'workspace-search', 'web-research'],
-    missionWriteEligible: true,
-    commandExecutionEligible: false,
-    requiresSecurityAuthorization: false,
-  },
-  engineering: {
-    id: 'engineering',
-    description: 'Engineering analysis with implementation and command execution only inside an assigned Mission worktree.',
-    baseline: ['workspace-read', 'workspace-search'],
-    missionWriteEligible: true,
-    commandExecutionEligible: true,
-    requiresSecurityAuthorization: false,
-  },
-  'content-growth': {
-    id: 'content-growth',
-    description: 'Research/content specialist with artifact writes only when the Mission explicitly assigns implementation.',
-    baseline: ['workspace-read', 'workspace-search', 'web-research'],
-    missionWriteEligible: true,
     commandExecutionEligible: false,
     requiresSecurityAuthorization: false,
   },
@@ -133,8 +117,8 @@ export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, Capabilit
     id: 'restricted-security',
     description: 'Security specialist. Intrusive execution requires independently established authorization and a scoped Mission worktree.',
     baseline: ['workspace-read', 'workspace-search', 'web-research'],
-    missionWriteEligible: true,
-    commandExecutionEligible: true,
+    missionWriteEligible: false,
+    commandExecutionEligible: false,
     requiresSecurityAuthorization: true,
   },
   'high-stakes': {
@@ -157,7 +141,7 @@ export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, Capabilit
     id: 'queen-bee',
     description: 'User-facing orchestration authority for decomposition, reconciliation, delegation, and branch staging.',
     baseline: ['workspace-read', 'workspace-search', 'web-research', 'delegation'],
-    missionWriteEligible: true,
+    missionWriteEligible: false,
     commandExecutionEligible: false,
     requiresSecurityAuthorization: false,
   },
@@ -169,36 +153,51 @@ export const CAPABILITY_PROFILES: Readonly<Record<CapabilityProfileId, Capabilit
     commandExecutionEligible: true,
     requiresSecurityAuthorization: false,
   },
-  'native-review': {
-    id: 'native-review',
-    description: 'Independent read-only test/review authority.',
+  'native-test': {
+    id: 'native-test',
+    description: 'Protected independent test authority with command execution but no repository implementation authority.',
     baseline: ['workspace-read', 'workspace-search'],
     missionWriteEligible: false,
     commandExecutionEligible: true,
     requiresSecurityAuthorization: false,
   },
+  'native-review': {
+    id: 'native-review',
+    description: 'Independent read-only test/review authority.',
+    baseline: ['workspace-read', 'workspace-search'],
+    missionWriteEligible: false,
+    commandExecutionEligible: false,
+    requiresSecurityAuthorization: false,
+  },
 };
 
 const DIVISION_DEFAULTS: Readonly<Record<AgencyDivision, CapabilityProfileId>> = {
-  academic: 'research',
-  design: 'product-design',
-  engineering: 'engineering',
+  academic: 'specialist-research',
+  design: 'specialist-research',
+  engineering: 'specialist-local',
   finance: 'high-stakes',
-  'game-development': 'engineering',
-  gis: 'research',
+  'game-development': 'specialist-local',
+  gis: 'specialist-research',
   healthcare: 'high-stakes',
-  marketing: 'content-growth',
-  'paid-media': 'content-growth',
-  product: 'product-design',
-  'project-management': 'product-design',
-  research: 'research',
-  sales: 'content-growth',
+  marketing: 'specialist-research',
+  'paid-media': 'specialist-research',
+  product: 'specialist-research',
+  'project-management': 'specialist-research',
+  research: 'specialist-research',
+  sales: 'specialist-research',
   security: 'restricted-security',
-  'spatial-computing': 'engineering',
-  specialized: 'advisory',
-  support: 'advisory',
-  testing: 'native-review',
+  'spatial-computing': 'specialist-local',
+  specialized: 'specialist-local',
+  support: 'specialist-local',
+  testing: 'specialist-local',
 };
+
+export function defaultSpecialistCapabilityProfile(
+  departmentId: DepartmentId,
+  risk: DepartmentRisk = 'standard',
+): CapabilityProfileId {
+  return defaultCapabilityProfileForDivision(departmentId, risk);
+}
 
 export function agencyDivisionFromDefinitionPath(
   definitionPath: string | undefined,
@@ -233,50 +232,47 @@ export function defaultCapabilityProfileForDivision(
 }
 
 export function resolveAgencyCapabilityGrant(
-  input: CapabilityResolutionInput,
+  input: AgencyCapabilityResolutionInput,
 ): EffectiveCapabilityGrant {
   const profileId = defaultCapabilityProfileForDivision(input.division, input.risk);
-  const profile = CAPABILITY_PROFILES[profileId];
+  return resolveCapabilityGrant({
+    profileId,
+    missionAccessMode: input.missionAccessMode,
+    implementationAssigned: input.implementationAssigned,
+    securityAuthorized: input.securityAuthorized,
+  });
+}
+
+/** Resolves protected Council roles separately from imported specialist routing. */
+export function resolveCapabilityGrant(
+  input: CapabilityResolutionInput,
+): EffectiveCapabilityGrant {
+  const profile = CAPABILITY_PROFILES[input.profileId];
   const granted = new Set<HostCapability>(profile.baseline);
   const explanation: string[] = [];
+  const protectedBuilderAssignment =
+    profile.id === 'native-builder' &&
+    input.missionAccessMode === 'workspace-write' &&
+    input.implementationAssigned === true;
 
-  const securitySatisfied =
-    !profile.requiresSecurityAuthorization || input.securityAuthorized === true;
-  const missionWriteSatisfied =
-    input.missionAccessMode === 'workspace-write' && input.implementationAssigned;
-
-  if (profile.requiresSecurityAuthorization && !securitySatisfied) {
-    explanation.push('Intrusive security capabilities remain disabled until authorization and scope are independently established.');
-  }
-
-  if (profile.missionWriteEligible && missionWriteSatisfied && securitySatisfied) {
+  if (profile.missionWriteEligible && protectedBuilderAssignment) {
     granted.add('workspace-write');
-    explanation.push('Workspace writes are enabled only for the explicitly assigned Mission worktree.');
-  } else if (profile.missionWriteEligible) {
-    explanation.push('Workspace writes remain disabled because no write-capable implementation assignment is active.');
+    explanation.push('Workspace writes are enabled only for protected Builder inside its exact Mission worktree.');
   }
-
-  if (
-    profile.commandExecutionEligible &&
-    missionWriteSatisfied &&
-    securitySatisfied
-  ) {
+  if (profile.id === 'native-test') {
     granted.add('command-execution');
-    explanation.push('Command execution is scoped to the assigned Mission and host execution policy.');
-  } else if (profile.commandExecutionEligible) {
-    explanation.push('Command execution remains disabled outside a qualifying Mission assignment.');
+    explanation.push('Command execution is limited to the protected Test Engineer gate contract.');
+  } else if (profile.commandExecutionEligible && protectedBuilderAssignment) {
+    granted.add('command-execution');
+    explanation.push('Command execution is limited to the protected Builder Mission contract.');
   }
-
-  // Imported personas never grant these to themselves. Destructive authority is
-  // always a separate user-approval decision, and memory is host-owned.
   granted.delete('destructive-operation');
   granted.delete('persistent-memory');
 
-  const denied = ALL_HOST_CAPABILITIES.filter((capability) => !granted.has(capability));
   return {
-    profileId,
+    profileId: profile.id,
     granted: ALL_HOST_CAPABILITIES.filter((capability) => granted.has(capability)),
-    denied,
+    denied: ALL_HOST_CAPABILITIES.filter((capability) => !granted.has(capability)),
     permissionMode: granted.has('workspace-write') ? 'host-default' : 'plan',
     explanation,
   };

@@ -93,7 +93,7 @@ Use the canonical policy in `src/orchestration/destructivePolicy.ts` represented
 
 A review branch plus explicit user approval is mandatory for destructive or high-impact work, including history rewrites, data deletion, schema/data migrations, security-boundary changes, credential/secret changes, auth/permission changes, deployment/release changes, or any change the user explicitly wants to review.
 
-Low-risk, non-destructive work may be promoted directly to main only after all required department readiness checks, LLM Council review, and applicable Test/Review gates pass.
+Low-risk, non-destructive work may target main only after all required department readiness checks, LLM Council review, applicable Test/Review gates, and an explicit user approval record pass.
 
 Never reinterpret "non-destructive" as permission to bypass tests, review, Mission ownership, or exact Git identity checks.
 
@@ -102,13 +102,15 @@ Never reinterpret "non-destructive" as permission to bypass tests, review, Missi
 Imported Agency frontmatter does not decide permissions. Resolve capabilities through Council's host-owned policy.
 
 - Research: read/search + host-approved web research.
-- Product/design: read/search/web; write only for an explicit implementation assignment/worktree.
-- Engineering/game/spatial: read/search; write/command execution only for an explicit implementation assignment/worktree.
-- Marketing/sales/paid media: read/search/web; writes only for requested content/artifacts in an assigned worktree.
-- Security: normal analysis by default; intrusive execution additionally requires independently established authorization and scope.
+- Product/design: read/search/web analysis only.
+- Engineering/game/spatial: read/search analysis only.
+- Marketing/sales/paid media: read/search/web analysis only.
+- Security: read-only analysis; intrusive execution additionally requires a separate protected path with independently established authorization and scope.
 - Healthcare/finance/high-stakes: research/analysis only unless a separate host policy explicitly permits more; normal high-stakes safeguards remain.
 - Department Heads: delegation + read/search, no implementation authority.
 - Queen Bee: decomposition/reconciliation/delegation; destructive authority is never self-granted.
+- Native Builder: the only protected profile eligible for repository writes and command execution.
+- Native Test: the protected profile eligible for executable acceptance commands without repository-write authority.
 
 ## ChatGPT portability
 

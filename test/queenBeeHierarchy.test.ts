@@ -128,7 +128,7 @@ describe('Queen Bee hierarchy policy', () => {
 });
 
 describe('host-owned Agency capability policy', () => {
-  it('keeps engineering read-only until an implementation worktree is assigned', () => {
+  it('keeps imported engineering specialists read-only even when implementation is assigned', () => {
     const readOnly = resolveAgencyCapabilityGrant({
       division: 'engineering',
       risk: 'standard',
@@ -144,8 +144,8 @@ describe('host-owned Agency capability policy', () => {
       missionAccessMode: 'workspace-write',
       implementationAssigned: true,
     });
-    expect(implementation.granted).toContain('workspace-write');
-    expect(implementation.granted).toContain('command-execution');
+    expect(implementation.granted).not.toContain('workspace-write');
+    expect(implementation.granted).not.toContain('command-execution');
   });
 
   it('does not enable intrusive security capabilities without independent authorization', () => {
@@ -166,8 +166,8 @@ describe('host-owned Agency capability policy', () => {
       implementationAssigned: true,
       securityAuthorized: true,
     });
-    expect(authorized.granted).toContain('workspace-write');
-    expect(authorized.granted).toContain('command-execution');
+    expect(authorized.granted).not.toContain('workspace-write');
+    expect(authorized.granted).not.toContain('command-execution');
     expect(authorized.granted).not.toContain('destructive-operation');
   });
 

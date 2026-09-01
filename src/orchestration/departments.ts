@@ -10,7 +10,9 @@ export interface DepartmentDefinition {
   readonly displayName: string;
   readonly officeFloor: number;
   readonly headAgent: 'department-head';
-  readonly specialistPathPrefix: string;
+  readonly specialistAgent: 'department-specialist';
+  /** Compatibility metadata for the imported catalog; never an authority or routing grant. */
+  readonly specialistPathPrefix?: string;
   readonly defaultCapabilityProfile: CapabilityProfileId;
 }
 
@@ -48,6 +50,7 @@ export const DEPARTMENTS: readonly DepartmentDefinition[] = AGENCY_DIVISIONS.map
     displayName: DISPLAY_NAMES[id],
     officeFloor: EXECUTIVE_FLOORS.departmentsStart + index,
     headAgent: 'department-head',
+    specialistAgent: 'department-specialist',
     specialistPathPrefix: `.claude/agents/agency-agents/${id}/`,
     defaultCapabilityProfile: defaultCapabilityProfileForDivision(id),
   }),
@@ -70,3 +73,5 @@ export function departmentById(
 export function isAgencyDivision(value: string): value is AgencyDivision {
   return (AGENCY_DIVISIONS as readonly string[]).includes(value);
 }
+
+export const isDepartmentId = isAgencyDivision;

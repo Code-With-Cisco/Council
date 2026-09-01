@@ -1,20 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveAgencyCapabilityGrant } from '../src/orchestration/capabilityPolicy.js';
+import {
+  resolveAgencyCapabilityGrant,
+  resolveCapabilityGrant,
+} from '../src/orchestration/capabilityPolicy.js';
 import { assessIntegrationImpact } from '../src/orchestration/destructivePolicy.js';
 import { buildOfficeTower } from '../src/orchestration/officeState.js';
 import {
   approveQueenBeeIntegration,
   assessQueenBeeIntegration,
   assignDepartment,
+  buildCouncilPacket,
   createQueenBeeMission,
+  evaluateCouncilReadiness,
   markQueenBeeIntegrated,
   recordDepartmentHeadReview,
+  recordIntegrationGates,
   recordLlmCouncilReview,
   recordQueenBeeReview,
   recordSpecialistSubmission,
 } from '../src/orchestration/queenBee.js';
-import { assessDepartmentReadiness } from '../src/orchestration/readiness.js';
+import {
+  assessDepartmentReadiness,
+  evaluateDepartmentReadiness,
+} from '../src/orchestration/readiness.js';
+import type {
+  DepartmentAssignment as DurableDepartmentAssignment,
+  QueenBeeDepartmentResult,
+  SpecialistWorkProduct,
+} from '../src/orchestration/types.js';
 
 const passedReadiness = {
   specialistSubmissionPresent: true,
@@ -29,7 +43,7 @@ const passedReadiness = {
 };
 
 describe('host-owned Agency capability profiles', () => {
-  it('grants engineering writes only for an explicit write implementation assignment', () => {
+  it('keeps imported engineering specialists read-only', () => {
     const planning = resolveAgencyCapabilityGrant({
       division: 'engineering',
       risk: 'standard',
@@ -45,8 +59,8 @@ describe('host-owned Agency capability profiles', () => {
       missionAccessMode: 'workspace-write',
       implementationAssigned: true,
     });
-    expect(implementation.granted).toContain('workspace-write');
-    expect(implementation.granted).toContain('command-execution');
+    expect(implementation.granted).not.toContain('workspace-write');
+    expect(implementation.granted).not.toContain('command-execution');
     expect(implementation.granted).not.toContain('destructive-operation');
     expect(implementation.granted).not.toContain('persistent-memory');
   });
@@ -69,8 +83,8 @@ describe('host-owned Agency capability profiles', () => {
       implementationAssigned: true,
       securityAuthorized: true,
     });
-    expect(authorized.granted).toContain('workspace-write');
-    expect(authorized.granted).toContain('command-execution');
+    expect(authorized.granted).not.toContain('workspace-write');
+    expect(authorized.granted).not.toContain('command-execution');
     expect(authorized.granted).not.toContain('destructive-operation');
   });
 
@@ -86,6 +100,23 @@ describe('host-owned Agency capability profiles', () => {
       'workspace-search',
       'web-research',
     ]);
+  });
+
+  it('reserves implementation and executable acceptance for protected native roles', () => {
+    const builder = resolveCapabilityGrant({
+      profileId: 'native-builder',
+      missionAccessMode: 'workspace-write',
+      implementationAssigned: true,
+    });
+    expect(builder.granted).toContain('workspace-write');
+    expect(builder.granted).toContain('command-execution');
+
+    const test = resolveCapabilityGrant({
+      profileId: 'native-test',
+      missionAccessMode: 'read-only',
+    });
+    expect(test.granted).not.toContain('workspace-write');
+    expect(test.granted).toContain('command-execution');
   });
 });
 
@@ -135,24 +166,41 @@ describe('Queen Bee state machine', () => {
       department: 'engineering',
       objective: 'Implement the orchestration state machine.',
       specialistIds: ['Backend Architect'],
+      acceptanceCriteria: [
+        {
+          id: 'criterion-state-machine',
+          description: 'The orchestration state machine is implemented and validated.',
+          evidenceRequired: true,
+        },
+      ],
     });
     mission = recordSpecialistSubmission(mission, 'engineering', {
       specialistId: 'Backend Architect',
       summary: 'State machine implemented.',
+      deliverables: ['orchestration state machine'],
+      criterionAssessments: [
+        {
+          criterionId: 'criterion-state-machine',
+          status: 'satisfied',
+          evidence: ['typecheck', 'tests'],
+          rationale: 'The implementation passes static and runtime validation.',
+        },
+      ],
       evidence: ['typecheck', 'tests'],
       risks: [],
+      blockingFindings: [],
+      assumptions: [],
     });
     mission = recordDepartmentHeadReview(mission, 'engineering', {
-      readiness: passedReadiness,
       feedback: 'All required gates passed.',
     });
     return mission;
   }
 
-  it('runs department -> Queen Bee -> LLM Council -> direct main for non-destructive work', () => {
+  it('runs department -> Queen Bee -> LLM Council -> approved main for non-destructive work', () => {
     let mission = departmentReadyMission();
     expect(mission.state).toBe('queen-review');
-    expect(mission.departments[0]?.latestHeadReview?.readiness.readinessPercent).toBe(100);
+    expect(mission.departments[0]?.latestHeadReview?.readiness.ready).toBe(true);
 
     mission = recordQueenBeeReview(mission, {
       accepted: true,
@@ -169,10 +217,18 @@ describe('Queen Bee state machine', () => {
     });
     expect(mission.state).toBe('integration-assessment');
 
+    mission = recordIntegrationGates(mission, {
+      test: { status: 'passed', evidence: ['npm test'] },
+      review: { status: 'passed', evidence: ['independent review'] },
+    });
+
     mission = assessQueenBeeIntegration(mission, []);
-    expect(mission.state).toBe('ready-to-integrate');
+    expect(mission.state).toBe('awaiting-user-approval');
     expect(mission.integration?.target).toBe('main');
-    expect(mission.integration?.userApproved).toBe(true);
+    expect(mission.integration?.userApproved).toBe(false);
+
+    mission = approveQueenBeeIntegration(mission);
+    expect(mission.state).toBe('ready-to-integrate');
 
     mission = markQueenBeeIntegrated(mission);
     expect(mission.state).toBe('integrated');
@@ -190,6 +246,10 @@ describe('Queen Bee state machine', () => {
       summary: 'Council approved subject to integration policy.',
       departmentRevisionRequests: {},
     });
+    mission = recordIntegrationGates(mission, {
+      test: { status: 'passed', evidence: ['npm test'] },
+      review: { status: 'passed', evidence: ['independent review'] },
+    });
     mission = assessQueenBeeIntegration(mission, [
       { kind: 'tracked-file-delete', detail: 'Remove obsolete migration.' },
     ]);
@@ -200,6 +260,94 @@ describe('Queen Bee state machine', () => {
 
     mission = approveQueenBeeIntegration(mission);
     expect(mission.state).toBe('ready-to-integrate');
+  });
+
+  it('cannot assess integration until native Test and Review evidence is recorded', () => {
+    let mission = departmentReadyMission();
+    mission = recordQueenBeeReview(mission, {
+      accepted: true,
+      summary: 'Ready for Council.',
+      departmentRevisionRequests: {},
+    });
+    mission = recordLlmCouncilReview(mission, {
+      verdict: 'approve',
+      summary: 'Council approved the bounded change.',
+      departmentRevisionRequests: {},
+    });
+
+    expect(() => assessQueenBeeIntegration(mission, [])).toThrow(/gate evidence is missing/i);
+
+    mission = recordIntegrationGates(mission, {
+      test: { status: 'passed', evidence: [] },
+      review: { status: 'passed', evidence: ['review/1'] },
+    });
+    expect(() => assessQueenBeeIntegration(mission, [])).toThrow(/passed without evidence/i);
+  });
+
+  it('rejects criteria-free assignments, empty submissions, and duplicate submissions', () => {
+    let mission = createQueenBeeMission({
+      id: 'mission-fail-closed',
+      provider: 'codex',
+      objective: 'Prove the department evidence boundary.',
+    });
+    expect(() => assignDepartment(mission, {
+      department: 'engineering',
+      objective: 'Validate the boundary.',
+      specialistIds: ['Reviewer'],
+      acceptanceCriteria: [],
+    })).toThrow(/acceptance criteria/i);
+
+    mission = assignDepartment(mission, {
+      department: 'engineering',
+      objective: 'Validate the boundary.',
+      specialistIds: ['Reviewer'],
+      acceptanceCriteria: [{
+        id: 'criterion-proof',
+        description: 'Evidence proves the boundary.',
+        evidenceRequired: true,
+      }],
+    });
+    expect(() => recordSpecialistSubmission(mission, 'engineering', {
+      specialistId: 'Reviewer',
+      summary: '',
+      deliverables: [],
+      criterionAssessments: [],
+      evidence: [],
+      risks: [],
+      blockingFindings: [],
+      assumptions: [],
+    })).toThrow(/summary/i);
+
+    mission = recordSpecialistSubmission(mission, 'engineering', {
+      specialistId: 'Reviewer',
+      summary: 'Boundary validated.',
+      deliverables: ['validation report'],
+      criterionAssessments: [{
+        criterionId: 'criterion-proof',
+        status: 'satisfied',
+        evidence: ['proof'],
+        rationale: 'The report contains the proof.',
+      }],
+      evidence: ['proof'],
+      risks: [],
+      blockingFindings: [],
+      assumptions: [],
+    });
+    expect(() => recordSpecialistSubmission(mission, 'engineering', {
+      specialistId: 'Reviewer',
+      summary: 'Second submission.',
+      deliverables: ['duplicate report'],
+      criterionAssessments: [{
+        criterionId: 'criterion-proof',
+        status: 'satisfied',
+        evidence: ['proof'],
+        rationale: 'Duplicate.',
+      }],
+      evidence: ['proof'],
+      risks: [],
+      blockingFindings: [],
+      assumptions: [],
+    })).toThrow(/not accepting/i);
   });
 
   it('sends Council revisions back to the named department', () => {
@@ -219,6 +367,83 @@ describe('Queen Bee state machine', () => {
 
     expect(mission.state).toBe('department-work');
     expect(mission.departments[0]?.state).toBe('revision-required');
+  });
+});
+
+describe('Council evidence packet', () => {
+  function readyResult(): QueenBeeDepartmentResult {
+    const assignment: DurableDepartmentAssignment = {
+      id: 'assignment-engineering',
+      missionId: 'mission-packet',
+      departmentId: 'engineering',
+      objective: 'Produce verified evidence.',
+      includedScope: ['orchestration'],
+      excludedScope: [],
+      dependsOn: [],
+      acceptanceCriteria: [{
+        id: 'criterion-evidence',
+        description: 'Verified evidence is present.',
+        evidenceRequired: true,
+      }],
+      iteration: 1,
+      state: 'head-review',
+    };
+    const product: SpecialistWorkProduct = {
+      workId: 'work-engineering',
+      assignmentId: assignment.id,
+      departmentId: assignment.departmentId,
+      specialistRole: 'Reviewer',
+      summary: 'Evidence verified.',
+      deliverables: ['evidence report'],
+      criterionAssessments: [{
+        criterionId: 'criterion-evidence',
+        status: 'satisfied',
+        evidence: ['evidence/report'],
+        rationale: 'The report satisfies the criterion.',
+      }],
+      evidence: ['evidence/report'],
+      risks: [],
+      blockingFindings: [],
+      assumptions: [],
+    };
+    return {
+      assignment,
+      product,
+      review: {
+        assignmentId: assignment.id,
+        departmentId: assignment.departmentId,
+        iteration: assignment.iteration,
+        readiness: evaluateDepartmentReadiness(assignment, product),
+      },
+    };
+  }
+
+  it('recomputes readiness and rejects a forged ready review', () => {
+    const valid = readyResult();
+    expect(evaluateCouncilReadiness([valid]).ready).toBe(true);
+    expect(buildCouncilPacket({
+      missionId: 'mission-packet',
+      exactQuestion: 'Is this evidence-backed change ready?',
+      departmentResults: [valid],
+    }).missionId).toBe('mission-packet');
+
+    const forged: QueenBeeDepartmentResult = {
+      ...valid,
+      product: {
+        ...valid.product,
+        departmentId: 'design',
+        deliverables: [],
+        criterionAssessments: [],
+        evidence: [],
+        blockingFindings: ['Evidence is missing.'],
+      },
+    };
+    expect(evaluateCouncilReadiness([forged]).ready).toBe(false);
+    expect(() => buildCouncilPacket({
+      missionId: 'mission-packet',
+      exactQuestion: 'Can forged readiness pass?',
+      departmentResults: [forged],
+    })).toThrow(/not ready|mismatched|stale/i);
   });
 });
 

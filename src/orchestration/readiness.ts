@@ -1,3 +1,10 @@
+import {
+  MAX_DEPARTMENT_ITERATIONS,
+  type DepartmentAssignment as DurableDepartmentAssignment,
+  type DepartmentReadiness as DurableDepartmentReadiness,
+  type SpecialistWorkProduct,
+} from './types.js';
+
 export type ReadinessCheckId =
   | 'specialist-submission'
   | 'requirements-satisfied'
@@ -158,5 +165,131 @@ export function assessDepartmentReadiness(
     ready: readinessPercent === 100 && blockers.length === 0,
     checks,
     blockers,
+  };
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+/**
+ * Adapts durable Mission assignment evidence into the canonical fail-closed
+ * readiness gate. This preserves the durable orchestration API without
+ * creating a second readiness decision.
+ */
+export function evaluateDepartmentReadiness(
+  assignment: DurableDepartmentAssignment,
+  product: SpecialistWorkProduct,
+): DurableDepartmentReadiness {
+  const reasons: string[] = [];
+  const unresolvedCriteria: string[] = [];
+  const hasAcceptanceCriteria = assignment.acceptanceCriteria.length > 0;
+  if (!hasAcceptanceCriteria) {
+    reasons.push('The department assignment has no acceptance criteria.');
+  }
+  const hasDeliverables = product.deliverables.some((deliverable) => deliverable.trim() !== '');
+  if (!hasDeliverables) {
+    reasons.push('The specialist work product has no deliverables.');
+  }
+  const identityMatches =
+    product.assignmentId === assignment.id &&
+    product.departmentId === assignment.departmentId;
+  if (product.assignmentId !== assignment.id) {
+    reasons.push('The specialist product belongs to a different department assignment.');
+  }
+  if (product.departmentId !== assignment.departmentId) {
+    reasons.push('The specialist product reports a different department.');
+  }
+
+  const assessmentsByCriterion = new Map<string, typeof product.criterionAssessments>();
+  for (const assessment of product.criterionAssessments) {
+    const existing = assessmentsByCriterion.get(assessment.criterionId) ?? [];
+    assessmentsByCriterion.set(assessment.criterionId, [...existing, assessment]);
+  }
+  for (const criterion of assignment.acceptanceCriteria) {
+    const assessments = assessmentsByCriterion.get(criterion.id) ?? [];
+    if (assessments.length !== 1) {
+      unresolvedCriteria.push(criterion.id);
+      reasons.push(
+        assessments.length === 0
+          ? `Acceptance criterion ${criterion.id} has no assessment.`
+          : `Acceptance criterion ${criterion.id} has multiple competing assessments.`,
+      );
+      continue;
+    }
+    const assessment = assessments[0];
+    if (assessment?.status !== 'satisfied') {
+      unresolvedCriteria.push(criterion.id);
+      reasons.push(`Acceptance criterion ${criterion.id} is not satisfied.`);
+      continue;
+    }
+    if (criterion.evidenceRequired && assessment.evidence.length === 0) {
+      unresolvedCriteria.push(criterion.id);
+      reasons.push(`Acceptance criterion ${criterion.id} is missing required evidence.`);
+    }
+  }
+
+  const knownCriterionIds = new Set(
+    assignment.acceptanceCriteria.map((criterion) => criterion.id),
+  );
+  const unknownCriterionIds = product.criterionAssessments
+    .filter((assessment) => !knownCriterionIds.has(assessment.criterionId))
+    .map((assessment) => assessment.criterionId);
+  for (const criterionId of unknownCriterionIds) {
+    reasons.push(`The product includes an assessment for unknown criterion ${criterionId}.`);
+  }
+  const blockingFindings = unique(
+    product.blockingFindings.filter((finding) => finding.trim() !== ''),
+  );
+  if (blockingFindings.length > 0) reasons.push('Blocking findings remain unresolved.');
+  const criteriaComplete = hasAcceptanceCriteria && unresolvedCriteria.length === 0;
+  const productEvidence = new Set(product.evidence.filter((evidence) => evidence.trim() !== ''));
+  const evidenceComplete =
+    hasDeliverables &&
+    productEvidence.size > 0 &&
+    assignment.acceptanceCriteria.every((criterion) => {
+      if (!criterion.evidenceRequired) return true;
+      const assessment = product.criterionAssessments.find(
+        (candidate) => candidate.criterionId === criterion.id,
+      );
+      return (
+        (assessment?.evidence.length ?? 0) > 0 &&
+        assessment!.evidence.every((evidence) => productEvidence.has(evidence))
+      );
+    });
+  if (!evidenceComplete) {
+    reasons.push('The work product does not contain complete supporting evidence.');
+  }
+
+  const canonical = assessDepartmentReadiness({
+    specialistSubmissionPresent: identityMatches,
+    requirementsSatisfied: criteriaComplete,
+    scopePreserved: identityMatches && unknownCriterionIds.length === 0,
+    evidenceAttached: evidenceComplete,
+    acceptance: { status: criteriaComplete ? 'passed' : 'failed' },
+    independentReview: {
+      status: 'not-applicable',
+      rationale: 'Independent executable Test/Review gates run after department readiness.',
+    },
+    unresolvedBlockers: blockingFindings,
+    materialUncertainties: unknownCriterionIds.map(
+      (criterionId) => `Unknown criterion: ${criterionId}`,
+    ),
+    departmentHeadAttested:
+      identityMatches && criteriaComplete && evidenceComplete && blockingFindings.length === 0,
+  });
+  const ready = canonical.ready;
+  const iterationLimitReached = assignment.iteration >= MAX_DEPARTMENT_ITERATIONS;
+  return {
+    assignmentId: assignment.id,
+    ready,
+    decision: ready ? 'ready' : iterationLimitReached ? 'escalate' : 'iterate',
+    evidenceComplete,
+    criteriaComplete,
+    unresolvedCriteria: unique(unresolvedCriteria),
+    blockingFindings,
+    reasons: ready
+      ? ['All explicit acceptance criteria are satisfied with required evidence and no blocker remains.']
+      : unique([...reasons, ...canonical.blockers]),
   };
 }

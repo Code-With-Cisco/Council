@@ -669,7 +669,7 @@ describe('ClaudeCodeAgentSupervisor lifecycle actions', () => {
     {
       division: 'engineering',
       accessMode: 'workspace-write' as const,
-      expectsImplementationTools: true,
+      expectsImplementationTools: false,
     },
     {
       division: 'healthcare',
